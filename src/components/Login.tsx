@@ -1,0 +1,137 @@
+import React, { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Phone, Lock, Eye, EyeOff, ShieldCheck, Headphones } from 'lucide-react';
+import { toast } from 'sonner';
+
+interface LoginProps {
+  onNavigate: (page: any) => void;
+  onLogin: (phone: string, password: string) => void;
+}
+
+export default function Login({ onNavigate, onLogin }: LoginProps) {
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleLogin = () => {
+    if (!phone) {
+      toast.error('Please enter your phone number');
+      return;
+    }
+    if (!password) {
+      toast.error('Please enter your password');
+      return;
+    }
+    onLogin(phone, password);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#2b3270] flex flex-col">
+      {/* Header */}
+      <div className="p-4 flex items-center justify-between text-white">
+        <div className="w-10" /> {/* Spacer instead of close button */}
+        <h1 className="text-2xl font-serif italic tracking-widest text-[#f8d08c]">LAKSHMI CLUB</h1>
+        <div className="flex items-center gap-1">
+          <img src="https://flagcdn.com/us.svg" alt="EN" className="w-6 h-4" />
+          <span className="text-sm font-bold">EN</span>
+        </div>
+      </div>
+
+      {/* Banner Text */}
+      <div className="px-6 py-4 bg-gradient-to-b from-[#2b3270] to-[#1a1a2e]">
+        <p className="text-xs text-blue-200 opacity-80">Please log in with your phone number or email</p>
+        <p className="text-xs text-blue-200 opacity-80">If you forget your password, please contact customer service</p>
+      </div>
+
+      {/* Login Type Toggle */}
+      <div className="flex bg-[#3a448c]">
+        <button className="flex-1 py-3 flex flex-col items-center gap-1 border-b-2 border-blue-400 text-blue-400">
+          <Phone className="w-5 h-5" />
+          <span className="text-xs font-bold">Log in with phone</span>
+        </button>
+      </div>
+
+      {/* Form */}
+      <div className="flex-1 p-6 space-y-6">
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-blue-100">
+              <Phone className="w-4 h-4 text-blue-400" /> Phone number
+            </label>
+            <div className="flex gap-2">
+              <div className="flex items-center gap-1 px-3 bg-[#3a448c] rounded-md border border-blue-900/50 text-white">
+                <span className="text-sm">+91</span>
+                <span className="text-[10px] text-blue-300">▼</span>
+              </div>
+              <Input 
+                placeholder="Please enter the phone nur" 
+                className="bg-[#3a448c] border-blue-900/50 text-white placeholder:text-blue-300/50"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-blue-100">
+              <Lock className="w-4 h-4 text-blue-400" /> Password
+            </label>
+            <div className="relative">
+              <Input 
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Please enterPassword" 
+                className="bg-[#3a448c] border-blue-900/50 text-white pr-10 placeholder:text-blue-300/50"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button 
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-300"
+                onClick={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Checkbox id="remember" className="border-blue-400 data-[state=checked]:bg-blue-400" />
+            <label htmlFor="remember" className="text-xs text-blue-200">Remember password</label>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <Button 
+            className="w-full h-12 bg-blue-400 hover:bg-blue-500 text-white font-bold text-lg rounded-full"
+            onClick={handleLogin}
+          >
+            Log in
+          </Button>
+          <Button 
+            variant="outline" 
+            className="w-full h-12 border-blue-400 text-blue-400 hover:bg-blue-400/10 font-bold text-lg rounded-full"
+            onClick={() => onNavigate('register')}
+          >
+            Register
+          </Button>
+        </div>
+
+        <div className="flex justify-around pt-10">
+          <button className="flex flex-col items-center gap-2 text-blue-300">
+            <div className="w-10 h-10 rounded-full bg-[#3a448c] flex items-center justify-center">
+              <Lock className="w-5 h-5" />
+            </div>
+            <span className="text-xs">Forgot password</span>
+          </button>
+          <button className="flex flex-col items-center gap-2 text-blue-300">
+            <div className="w-10 h-10 rounded-full bg-[#3a448c] flex items-center justify-center">
+              <Headphones className="w-5 h-5" />
+            </div>
+            <span className="text-xs">Customer Service</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
