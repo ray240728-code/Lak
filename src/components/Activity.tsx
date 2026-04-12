@@ -56,29 +56,59 @@ export default function Activity({ onNavigate }: ActivityProps) {
     if (cardIndex !== -1) {
       const card = giftCards[cardIndex];
       
-      // Check min deposit requirement
+      // Get current user
       const userStr = localStorage.getItem('lakshmi_user');
-      const user = userStr ? JSON.parse(userStr) : { totalDeposit: 500 }; // Mock total deposit if not found
-
-      if (user.totalDeposit < card.minDeposit) {
-        toast.error(`You need a total deposit of at least ₹${card.minDeposit} to claim this gift card. Your current total deposit: ₹${user.totalDeposit}`);
+      const user = userStr ? JSON.parse(userStr) : null;
+      
+      if (!user) {
+        toast.error('User not found. Please login again.');
         return;
       }
 
-      // Mark as claimed
+      // Check if max uses reached (strictly 1 now)
+      if (card.usedCount >= 1 || card.status !== 'available') {
+        toast.error('This gift code has already been claimed');
+        return;
+      }
+
+      // Check min deposit requirement
+      // Use real user data from lakshmi_users for accurate totalDeposit
+      const allUsers = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
+      const currentUserData = allUsers.find((u: any) => u.phone === user.phone);
+      const totalDeposit = currentUserData ? currentUserData.totalDeposit : 0;
+
+      if (totalDeposit < card.minDeposit) {
+        toast.error(`You need a total deposit of at least ₹${card.minDeposit} to claim this gift card. Your current total deposit: ₹${totalDeposit}`);
+        return;
+      }
+
+      // Update card
+      giftCards[cardIndex].usedCount = 1;
       giftCards[cardIndex].status = 'claimed';
-      giftCards[cardIndex].claimedBy = 'user123';
+      if (!giftCards[cardIndex].claimedBy) giftCards[cardIndex].claimedBy = [];
+      giftCards[cardIndex].claimedBy.push(user.phone);
+      
       localStorage.setItem('lakshmi_giftcards', JSON.stringify(giftCards));
 
       // Update balance
-      const currentBalance = parseFloat(localStorage.getItem('lakshmi_balance') || '101.00');
+      const currentBalance = parseFloat(localStorage.getItem('lakshmi_balance') || '0');
       const newBalance = currentBalance + card.amount;
       localStorage.setItem('lakshmi_balance', newBalance.toString());
+
+      // Update user balance in lakshmi_users as well for consistency
+      const updatedUsers = allUsers.map((u: any) => {
+        if (u.phone === user.phone) {
+          return { ...u, balance: u.balance + card.amount };
+        }
+        return u;
+      });
+      localStorage.setItem('lakshmi_users', JSON.stringify(updatedUsers));
 
       // Add to transaction history
       const transactions = JSON.parse(localStorage.getItem('lakshmi_transactions') || '[]');
       const newTransaction = {
         id: Math.random().toString(36).substr(2, 9),
+        userId: user.phone,
         type: 'gift',
         amount: card.amount,
         status: 'completed',
@@ -90,7 +120,7 @@ export default function Activity({ onNavigate }: ActivityProps) {
       toast.success(`Successfully claimed ₹${card.amount}!`);
       setGiftCode('');
     } else {
-      toast.error('Invalid or already claimed gift code');
+      toast.error('Invalid or expired gift code');
     }
   };
 

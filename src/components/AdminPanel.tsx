@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronLeft, Users, Wallet, TrendingUp, Settings, Check, X, Search, Image, Trash2, Plus, Gift, Bell, Trophy } from 'lucide-react';
+import { ChevronLeft, Users, Wallet, TrendingUp, Settings, Check, X, Search, Image, Trash2, Plus, Gift, Bell, Trophy, History } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { ActivityItem, GiftCard, DepositRequest, WithdrawalRequest, AppSettings, User, GameMode } from '../types';
 import { getRoundId, generateRoundResult } from '../lib/gameLogic';
 
@@ -54,6 +55,48 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
 
     updatePredictions();
     const interval = setInterval(updatePredictions, 1000);
+
+    // Backfill history for admin view
+    const savedHistory = JSON.parse(localStorage.getItem('lakshmi_history') || '[]');
+    const modes: GameMode[] = ['30sec', '1min', '3min', '5min'];
+    const now = Date.now();
+    let newHistory = [...savedHistory];
+    let hasChanges = false;
+    
+    modes.forEach(mode => {
+      const modeHistory = newHistory.filter(h => h.mode === mode);
+      if (modeHistory.length < 20) {
+        let intervalMs = 60000;
+        if (mode === '30sec') intervalMs = 30000;
+        if (mode === '3min') intervalMs = 180000;
+        if (mode === '5min') intervalMs = 300000;
+
+        for (let i = 1; i <= 50; i++) {
+          const pastTime = now - (i * intervalMs);
+          const roundId = getRoundId(mode, pastTime);
+          if (!newHistory.find(r => r.id === roundId)) {
+            const result = generateRoundResult(roundId);
+            newHistory.push({
+              id: roundId,
+              mode: mode,
+              startTime: pastTime - intervalMs,
+              endTime: pastTime,
+              resultColor: result.color,
+              resultNumber: result.number,
+              resultBigSmall: result.bigSmall,
+              status: 'completed'
+            });
+            hasChanges = true;
+          }
+        }
+      }
+    });
+    
+    if (hasChanges) {
+      newHistory.sort((a, b) => b.id.localeCompare(a.id));
+      localStorage.setItem('lakshmi_history', JSON.stringify(newHistory.slice(0, 500)));
+    }
+
     return () => clearInterval(interval);
   }, []);
   
@@ -296,6 +339,9 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
       amount: newGiftCard.amount,
       minDeposit: newGiftCard.minDeposit,
       status: 'available',
+      maxUses: 1,
+      usedCount: 0,
+      claimedBy: [],
       createdAt: Date.now()
     };
     const updated = [card, ...giftCards];
@@ -337,8 +383,41 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
             <TabsTrigger value="giftcards" className="flex-1 min-w-[80px] text-[10px]"><Gift className="w-3 h-3 mr-1" /> Gifts</TabsTrigger>
             <TabsTrigger value="banners" className="flex-1 min-w-[80px] text-[10px]"><Image className="w-3 h-3 mr-1" /> Banners</TabsTrigger>
             <TabsTrigger value="prediction" className="flex-1 min-w-[80px] text-[10px]"><Trophy className="w-3 h-3 mr-1" /> Prediction</TabsTrigger>
+            <TabsTrigger value="history" className="flex-1 min-w-[80px] text-[10px]"><History className="w-3 h-3 mr-1" /> History</TabsTrigger>
             <TabsTrigger value="settings" className="flex-1 min-w-[80px] text-[10px]"><Settings className="w-3 h-3 mr-1" /> Settings</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="history" className="mt-4 space-y-4">
+            <Card className="border-none bg-[#2b3270] overflow-hidden">
+              <ScrollArea className="h-[500px]">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-blue-900/50 hover:bg-transparent">
+                      <TableHead className="text-blue-300">Round ID</TableHead>
+                      <TableHead className="text-blue-300">Mode</TableHead>
+                      <TableHead className="text-blue-300">Result</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {JSON.parse(localStorage.getItem('lakshmi_history') || '[]').slice(0, 300).map((round: any) => (
+                      <TableRow key={round.id} className="border-blue-900/50 hover:bg-white/5">
+                        <TableCell className="font-mono text-xs">{round.id}</TableCell>
+                        <TableCell className="text-xs uppercase">{round.mode}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white font-bold text-[10px] ${round.resultColor.includes('red') ? 'bg-red-500' : 'bg-green-500'}`}>
+                              {round.resultNumber}
+                            </div>
+                            <span className="text-[10px] uppercase text-blue-300">{round.resultBigSmall}</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            </Card>
+          </TabsContent>
 
           <TabsContent value="prediction" className="mt-4 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -414,6 +493,7 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
                     <TableHead className="text-blue-300">UID</TableHead>
                     <TableHead className="text-blue-300">Name</TableHead>
                     <TableHead className="text-blue-300">Balance</TableHead>
+                    <TableHead className="text-blue-300">Ref</TableHead>
                     <TableHead className="text-blue-300">Action</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -423,6 +503,7 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
                       <TableCell className="font-mono text-xs">{user.id}</TableCell>
                       <TableCell className="text-xs">{user.name}</TableCell>
                       <TableCell className="text-xs">₹{user.balance.toFixed(2)}</TableCell>
+                      <TableCell className="text-xs">{user.referralCount || 0}</TableCell>
                       <TableCell>
                         <Button size="sm" variant="outline" className="h-7 text-[10px] border-blue-400 text-blue-400" onClick={() => handleUpdateBalance(user.id, user.balance + 100)}>+100</Button>
                       </TableCell>

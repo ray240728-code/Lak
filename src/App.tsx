@@ -82,10 +82,23 @@ export default function App() {
       status: 'active',
       totalDeposit: 0,
       role: phone === '9999999999' ? 'admin' : 'user', // Default admin for testing
+      referredBy: inviteCode || undefined,
+      referralCount: 0,
       createdAt: Date.now()
     };
 
-    const updatedUsers = [...users, newUser];
+    let updatedUsers = [...users, newUser];
+
+    // Increment referral count for the referrer if inviteCode exists
+    if (inviteCode) {
+      updatedUsers = updatedUsers.map(u => {
+        if (u.id === inviteCode || u.phone === inviteCode) {
+          return { ...u, referralCount: (u.referralCount || 0) + 1 };
+        }
+        return u;
+      });
+    }
+
     localStorage.setItem('lakshmi_users', JSON.stringify(updatedUsers));
     
     toast.success('Registration successful! Please login.');
@@ -111,6 +124,7 @@ export default function App() {
         status: 'active',
         totalDeposit: 0,
         role: 'admin',
+        referralCount: 0,
         createdAt: Date.now()
       };
       localStorage.setItem('lakshmi_users', JSON.stringify([adminUser]));

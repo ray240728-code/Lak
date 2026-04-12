@@ -18,7 +18,7 @@ export default function Register({ onNavigate, onRegister }: RegisterProps) {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const invite = params.get('invite');
+    const invite = params.get('invite') || params.get('inv');
     if (invite) {
       setInviteCode(invite);
     }
@@ -130,6 +130,12 @@ export default function Register({ onNavigate, onRegister }: RegisterProps) {
           >
             I have an account <span className="ml-2 text-blue-400">Login</span>
           </Button>
+        </div>
+
+        <div className="pt-8 pb-4 text-center">
+          <p className="text-[10px] font-bold tracking-widest text-blue-300/40 uppercase">
+            Fair Play Partner by ADX
+          </p>
         </div>
       </div>
     </div>

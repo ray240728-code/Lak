@@ -77,24 +77,55 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
   }, [balance, history, myBets, user.phone]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now();
-      let modeSeconds = 60;
-      if (activeMode === '30sec') modeSeconds = 30;
-      if (activeMode === '3min') modeSeconds = 180;
-      if (activeMode === '5min') modeSeconds = 300;
-      
-      const secondsPassed = Math.floor(now / 1000) % modeSeconds;
-      const remaining = modeSeconds - secondsPassed;
-      setTimeLeft(remaining);
-      const newRoundId = getRoundId(activeMode, now);
-      if (newRoundId !== currentRoundId) {
-        if (currentRoundId) handleRoundEnd(currentRoundId, activeMode);
-        setCurrentRoundId(newRoundId);
+    // Backfill history for all modes
+    const modes: GameMode[] = ['30sec', '1min', '3min', '5min'];
+    const now = Date.now();
+    
+    setHistory(prev => {
+      let updatedHistory = [...prev];
+      let hasChanges = false;
+
+      modes.forEach(mode => {
+        let intervalMs = 60000;
+        if (mode === '30sec') intervalMs = 30000;
+        if (mode === '3min') intervalMs = 180000;
+        if (mode === '5min') intervalMs = 300000;
+
+        // Ensure at least 50 rounds for EACH mode
+        const modeHistory = updatedHistory.filter(h => h.mode === mode);
+        if (modeHistory.length < 50) {
+          for (let i = 1; i <= 50; i++) {
+            const pastTime = now - (i * intervalMs);
+            const roundId = getRoundId(mode, pastTime);
+            
+            if (!updatedHistory.find(r => r.id === roundId)) {
+              const result = generateRoundResult(roundId);
+              const pastRound: GameRound = {
+                id: roundId,
+                mode: mode,
+                startTime: pastTime - intervalMs,
+                endTime: pastTime,
+                resultColor: result.color,
+                resultNumber: result.number,
+                resultBigSmall: result.bigSmall,
+                status: 'completed'
+              };
+              updatedHistory.push(pastRound);
+              hasChanges = true;
+            }
+          }
+        }
+      });
+
+      if (hasChanges) {
+        // Sort history by ID descending
+        updatedHistory.sort((a, b) => b.id.localeCompare(a.id));
+        // Keep a reasonable amount of history (e.g., 500 rounds)
+        return updatedHistory.slice(0, 500);
       }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [activeMode, currentRoundId]);
+      return prev;
+    });
+  }, []);
 
   const handleRoundEnd = useCallback((roundId: string, mode: GameMode) => {
     const result = generateRoundResult(roundId);
@@ -162,6 +193,35 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
       return updatedBets;
     });
   }, [activeMode]);
+
+  useEffect(() => {
+    // Initialize currentRoundId for the active mode
+    setCurrentRoundId(getRoundId(activeMode, Date.now()));
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      let modeSeconds = 60;
+      if (activeMode === '30sec') modeSeconds = 30;
+      if (activeMode === '3min') modeSeconds = 180;
+      if (activeMode === '5min') modeSeconds = 300;
+      
+      const secondsPassed = Math.floor(now / 1000) % modeSeconds;
+      const remaining = modeSeconds - secondsPassed;
+      setTimeLeft(remaining);
+      
+      const newRoundId = getRoundId(activeMode, now);
+      if (newRoundId !== currentRoundId) {
+        // Only trigger handleRoundEnd if we have a valid previous round ID for THIS mode
+        // We check if currentRoundId matches the current mode's ID format
+        const modeCode = activeMode === '30sec' ? '30' : activeMode === '3min' ? '03' : activeMode === '5min' ? '05' : '01';
+        if (currentRoundId && currentRoundId.includes(modeCode)) {
+          handleRoundEnd(currentRoundId, activeMode);
+        }
+        setCurrentRoundId(newRoundId);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeMode, currentRoundId, handleRoundEnd]);
 
   const placeBet = () => {
     const amount = parseFloat(betAmount) * multiplier;

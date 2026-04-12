@@ -131,6 +131,12 @@ export default function Login({ onNavigate, onLogin }: LoginProps) {
             <span className="text-xs">Customer Service</span>
           </button>
         </div>
+
+        <div className="pt-8 pb-4 text-center">
+          <p className="text-[10px] font-bold tracking-widest text-blue-300/40 uppercase">
+            Fair Play Partner by ADX
+          </p>
+        </div>
       </div>
     </div>
   );

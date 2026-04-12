@@ -31,8 +31,10 @@ export interface GiftCard {
   code: string;
   amount: number;
   minDeposit: number;
-  status: 'available' | 'claimed';
-  claimedBy?: string;
+  status: 'available' | 'claimed' | 'expired';
+  maxUses: number;
+  usedCount: number;
+  claimedBy: string[]; // IDs of users who claimed it
   createdAt: number;
 }
 
@@ -100,5 +102,7 @@ export interface User {
   status: 'active' | 'blocked';
   totalDeposit: number;
   role: 'user' | 'admin';
+  referredBy?: string;
+  referralCount: number;
   createdAt: number;
 }

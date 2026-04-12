@@ -73,7 +73,7 @@ export default function Promotion({ onNavigate, user }: PromotionProps) {
                 {/* Direct Stats */}
                 <div className="p-4 space-y-4 border-r border-blue-900/50">
                   <div className="text-center">
-                    <p className="text-lg font-bold text-white">0</p>
+                    <p className="text-lg font-bold text-white">{user.referralCount || 0}</p>
                     <p className="text-[10px] text-blue-300">number of register</p>
                   </div>
                   <div className="text-center">
