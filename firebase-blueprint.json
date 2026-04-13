@@ -17,7 +17,7 @@
         "referralCount": { "type": "number" },
         "createdAt": { "type": "number" }
       },
-      "required": ["id", "phone", "password", "name", "balance", "status", "role", "createdAt"]
+      "required": ["id", "phone", "name", "balance", "status", "role", "createdAt"]
     },
     "Banner": {
       "title": "Banner",

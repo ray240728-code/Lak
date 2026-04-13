@@ -62,18 +62,8 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
   const [multiplier, setMultiplier] = useState<number>(1);
 
   useEffect(() => {
-    // Update balance in lakshmi_users
-    const users: User[] = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    const updatedUsers = users.map(u => {
-      if (u.phone === user.phone) {
-        return { ...u, balance: balance };
-      }
-      return u;
-    });
-    localStorage.setItem('lakshmi_users', JSON.stringify(updatedUsers));
-
-    localStorage.setItem('lakshmi_history', JSON.stringify(history));
-    localStorage.setItem('lakshmi_bets', JSON.stringify(myBets));
+    // Sync balance with Firestore if needed, but App.tsx handles the user object
+    // For now, we just ensure we don't write to localStorage
   }, [balance, history, myBets, user.phone]);
 
   useEffect(() => {
@@ -174,17 +164,7 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
       }
 
       if (totalWon > 0) {
-        setBalance(curr => {
-          const newBalance = curr + totalWon;
-          localStorage.setItem('lakshmi_balance', newBalance.toString());
-          
-          // Record transaction
-          const transaction = { id: 'W' + Date.now(), amount: totalWon, status: 'win', timestamp: Date.now(), type: 'win', description: `WinGo ${roundId} Win` };
-          const transactions = JSON.parse(localStorage.getItem('lakshmi_transactions') || '[]');
-          localStorage.setItem('lakshmi_transactions', JSON.stringify([transaction, ...transactions]));
-          
-          return newBalance;
-        });
+        setBalance(curr => curr + totalWon);
         toast.success(`You won ₹${totalWon.toFixed(2)}!`, {
           description: `Round ${roundId} result: ${result.number}`,
           icon: <Trophy className="w-5 h-5 text-yellow-500" />
@@ -239,17 +219,7 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
       status: 'pending'
     };
     
-    setBalance(prev => {
-      const newBalance = prev - amount;
-      localStorage.setItem('lakshmi_balance', newBalance.toString());
-      
-      // Record transaction
-      const transaction = { id: 'B' + Date.now(), amount, status: 'completed', timestamp: Date.now(), type: 'bet', description: `WinGo ${currentRoundId} Bet` };
-      const transactions = JSON.parse(localStorage.getItem('lakshmi_transactions') || '[]');
-      localStorage.setItem('lakshmi_transactions', JSON.stringify([transaction, ...transactions]));
-      
-      return newBalance;
-    });
+    setBalance(prev => prev - amount);
     setMyBets(prev => [newBet, ...prev]);
     setBetModalOpen(false);
     toast.success('Bet placed!');

@@ -17,15 +17,24 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && 
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         request.auth.token.email == "9999999999@lakshmi.club" ||
          request.auth.token.email == "purnundurayr@gmail.com");
     }
 
+    function isEmailMatch(userData) {
+      return isAuthenticated() && request.auth.token.email == userData.phone + "@lakshmi.club";
+    }
+
     function isValidUser(data) {
-      return data.keys().hasAll(['id', 'phone', 'name', 'balance', 'status', 'role', 'createdAt']) &&
-             data.phone is string && data.phone.size() >= 10 &&
+      let requiredFields = ['id', 'phone', 'name', 'balance', 'status', 'role', 'createdAt', 'totalDeposit', 'referralCount'];
+      return data.keys().hasAll(requiredFields) &&
+             data.phone is string && (data.phone.size() == 0 || data.phone.size() >= 10) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 50 &&
              data.balance is number &&
-             data.role in ['user', 'admin'];
+             data.totalDeposit is number &&
+             data.referralCount is number &&
+             data.role in ['user', 'admin'] &&
+             data.status in ['active', 'blocked'];
     }
 
     // ===============================================================
@@ -33,12 +42,16 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
+      allow read: if isOwner(userId) || isAdmin() || isEmailMatch(resource.data);
       allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
                     (isOwner(userId) || isAdmin());
-      allow update: if isAuthenticated() && isValidUser(request.resource.data) && 
-                    (isOwner(userId) || isAdmin()) &&
-                    (isAdmin() || request.resource.data.role == resource.data.role);
+      allow update: if isAuthenticated() && 
+                    (
+                      (isOwner(userId) && isValidUser(request.resource.data) && (isAdmin() || request.resource.data.role == resource.data.role)) ||
+                      (isAdmin()) ||
+                      (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['referralCount']) && 
+                       request.resource.data.referralCount == resource.data.referralCount + 1)
+                    );
     }
 
     match /banners/{bannerId} {
@@ -59,6 +72,18 @@ service cloud.firestore {
     match /bets/{betId} {
       allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+    }
+
+    match /deposits/{depositId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.userId == request.auth.token.email || isAdmin());
+      allow create: if isAuthenticated();
+      allow update: if isAdmin();
+    }
+
+    match /withdrawals/{withdrawalId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.userId == request.auth.token.email || isAdmin());
+      allow create: if isAuthenticated();
       allow update: if isAdmin();
     }
   }

@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import Layout from './Layout';
 
 import { User } from '../types';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
 interface WalletProps {
   onNavigate: (page: any) => void;
@@ -19,17 +21,27 @@ export default function Wallet({ onNavigate, user }: WalletProps) {
   const [stats, setStats] = React.useState({ recharge: 0, withdrawal: 0 });
 
   React.useEffect(() => {
-    const deposits = JSON.parse(localStorage.getItem('lakshmi_deposits') || '[]');
-    const withdrawals = JSON.parse(localStorage.getItem('lakshmi_withdrawals') || '[]');
+    const fetchStats = async () => {
+      try {
+        const depositsQuery = query(collection(db, 'deposits'), where('userId', '==', user.id), where('status', '==', 'completed'));
+        const withdrawalsQuery = query(collection(db, 'withdrawals'), where('userId', '==', user.id), where('status', '==', 'completed'));
+        
+        const [depositsSnap, withdrawalsSnap] = await Promise.all([
+          getDocs(depositsQuery),
+          getDocs(withdrawalsQuery)
+        ]);
+        
+        const totalRecharge = depositsSnap.docs.reduce((acc, doc) => acc + (doc.data().amount || 0), 0);
+        const totalWithdrawal = withdrawalsSnap.docs.reduce((acc, doc) => acc + (doc.data().amount || 0), 0);
+        
+        setStats({ recharge: totalRecharge, withdrawal: totalWithdrawal });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.LIST, 'wallet-stats');
+      }
+    };
     
-    const userDeposits = deposits.filter((d: any) => d.userId === user.phone && d.status === 'completed');
-    const userWithdrawals = withdrawals.filter((w: any) => w.userId === user.phone && w.status === 'completed');
-    
-    const totalRecharge = userDeposits.reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0);
-    const totalWithdrawal = userWithdrawals.reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0);
-    
-    setStats({ recharge: totalRecharge, withdrawal: totalWithdrawal });
-  }, [user.phone]);
+    fetchStats();
+  }, [user.id]);
 
   const handleAction = (action: string) => {
     switch (action) {
@@ -41,11 +53,16 @@ export default function Wallet({ onNavigate, user }: WalletProps) {
     }
   };
 
-  const refreshBalance = () => {
-    const users: User[] = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    const currentUser = users.find(u => u.phone === user.phone);
-    if (currentUser) setBalance(currentUser.balance);
-    toast.success('Balance updated!');
+  const refreshBalance = async () => {
+    try {
+      const userSnap = await getDoc(doc(db, 'users', user.id));
+      if (userSnap.exists()) {
+        setBalance(userSnap.data().balance || 0);
+        toast.success('Balance updated!');
+      }
+    } catch (error) {
+      toast.error('Failed to update balance');
+    }
   };
 
   return (

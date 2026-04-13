@@ -8,9 +8,10 @@ import { toast } from 'sonner';
 interface RegisterProps {
   onNavigate: (page: any) => void;
   onRegister: (phone: string, password: string, inviteCode: string) => void;
+  loading?: boolean;
 }
 
-export default function Register({ onNavigate, onRegister }: RegisterProps) {
+export default function Register({ onNavigate, onRegister, loading }: RegisterProps) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
@@ -25,15 +26,17 @@ export default function Register({ onNavigate, onRegister }: RegisterProps) {
   }, []);
 
   const handleRegister = () => {
-    if (!phone || phone.length < 10) {
+    const trimmedPhone = phone.trim();
+    const trimmedPassword = password.trim();
+    if (!trimmedPhone || trimmedPhone.length < 10) {
       toast.error('Please enter a valid phone number');
       return;
     }
-    if (!password || password.length < 5) {
-      toast.error('Password must be at least 5 characters');
+    if (!trimmedPassword || trimmedPassword.length < 6) {
+      toast.error('Password must be at least 6 characters (Firebase requirement)');
       return;
     }
-    onRegister(phone, password, inviteCode);
+    onRegister(trimmedPhone, trimmedPassword, inviteCode.trim());
   };
 
   return (
@@ -120,8 +123,13 @@ export default function Register({ onNavigate, onRegister }: RegisterProps) {
           <Button 
             className="w-full h-12 bg-blue-400 hover:bg-blue-500 text-white font-bold text-lg rounded-full"
             onClick={handleRegister}
+            disabled={loading}
           >
-            Register
+            {loading ? (
+              <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              'Register'
+            )}
           </Button>
           <Button 
             variant="outline" 

@@ -12,6 +12,9 @@ interface WithdrawProps {
   user: User;
 }
 
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+
 export default function Withdraw({ onBack, user }: WithdrawProps) {
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<'upi' | 'bank'>('upi');
@@ -23,6 +26,7 @@ export default function Withdraw({ onBack, user }: WithdrawProps) {
     holderName: ''
   });
   const [balance, setBalance] = useState<number>(user.balance);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [settings, setSettings] = useState<AppSettings>({
     minDeposit: 100,
     minWithdrawal: 200,
@@ -32,15 +36,23 @@ export default function Withdraw({ onBack, user }: WithdrawProps) {
   });
 
   useEffect(() => {
-    const users: User[] = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    const currentUser = users.find(u => u.phone === user.phone);
-    if (currentUser) setBalance(currentUser.balance);
+    const fetchBalance = async () => {
+      try {
+        const userSnap = await getDoc(doc(db, 'users', user.id));
+        if (userSnap.exists()) {
+          setBalance(userSnap.data().balance || 0);
+        }
+      } catch (error) {
+        console.error("Error fetching balance:", error);
+      }
+    };
+    fetchBalance();
 
     const savedSettings = JSON.parse(localStorage.getItem('lakshmi_settings') || '{}');
     if (savedSettings.minWithdrawal) {
       setSettings(prev => ({ ...prev, ...savedSettings }));
     }
-  }, [user.phone]);
+  }, [user.id]);
 
   const generateOrderNumber = () => {
     const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -51,7 +63,7 @@ export default function Withdraw({ onBack, user }: WithdrawProps) {
     return result;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const numAmount = parseFloat(amount);
     if (!amount || isNaN(numAmount)) {
       toast.error('Please enter a valid amount');
@@ -76,34 +88,28 @@ export default function Withdraw({ onBack, user }: WithdrawProps) {
       return;
     }
 
-    const user = JSON.parse(localStorage.getItem('lakshmi_auth') || '{}');
-    const newRequest: WithdrawalRequest = {
-      id: 'W' + Date.now(),
-      userId: user.phone,
-      amount: numAmount,
-      method,
-      details: method === 'upi' ? { upiId } : bankDetails,
-      status: 'pending',
-      timestamp: Date.now(),
-      orderNumber: generateOrderNumber()
-    };
+    setIsSubmitting(true);
+    try {
+      const newRequest = {
+        userId: user.id,
+        phone: user.phone,
+        amount: numAmount,
+        method,
+        details: method === 'upi' ? { upiId } : bankDetails,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        orderNumber: generateOrderNumber()
+      };
 
-    // Deduct balance immediately in lakshmi_users
-    const users: User[] = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    const updatedUsers = users.map(u => {
-      if (u.phone === user.phone) {
-        return { ...u, balance: u.balance - numAmount };
-      }
-      return u;
-    });
-    localStorage.setItem('lakshmi_users', JSON.stringify(updatedUsers));
-    setBalance(balance - numAmount);
+      await addDoc(collection(db, 'withdrawals'), newRequest);
 
-    const savedRequests = JSON.parse(localStorage.getItem('lakshmi_withdrawals') || '[]');
-    localStorage.setItem('lakshmi_withdrawals', JSON.stringify([newRequest, ...savedRequests]));
-
-    toast.success('Withdrawal request submitted! Admin will verify soon.');
-    onBack();
+      toast.success('Withdrawal request submitted! Admin will verify soon.');
+      onBack();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'withdrawals');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

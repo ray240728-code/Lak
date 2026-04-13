@@ -9,14 +9,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input';
 
 import { User as UserType } from '../types';
+import { auth, db, handleFirestoreError, OperationType } from '../firebase';
+import { doc, updateDoc, getDoc } from 'firebase/firestore';
 
 interface ProfileProps {
   onNavigate: (page: any) => void;
   onLogout: () => void;
+  onClearCache: () => void;
   user: UserType;
 }
 
-export default function Profile({ onNavigate, onLogout, user }: ProfileProps) {
+export default function Profile({ onNavigate, onLogout, onClearCache, user }: ProfileProps) {
   const isAdmin = user.role === 'admin';
   const [balance, setBalance] = React.useState<number>(user.balance);
 
@@ -32,7 +35,7 @@ export default function Profile({ onNavigate, onLogout, user }: ProfileProps) {
     confirm: false
   });
 
-  const handleChangePassword = () => {
+  const handleChangePassword = async () => {
     if (!passwords.old || !passwords.new || !passwords.confirm) {
       toast.error('Please fill all fields');
       return;
@@ -46,32 +49,33 @@ export default function Profile({ onNavigate, onLogout, user }: ProfileProps) {
       return;
     }
 
-    // Update password in lakshmi_users
-    const users: UserType[] = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    const updatedUsers = users.map(u => {
-      if (u.phone === user.phone) {
-        if (u.password !== passwords.old) {
-          toast.error('Incorrect old password');
-          return u;
-        }
-        return { ...u, password: passwords.new };
-      }
-      return u;
-    });
-    
-    if (updatedUsers.find(u => u.phone === user.phone)?.password === passwords.new) {
-      localStorage.setItem('lakshmi_users', JSON.stringify(updatedUsers));
+    if (user.password !== passwords.old) {
+      toast.error('Incorrect old password');
+      return;
+    }
+
+    try {
+      const userRef = doc(db, 'users', user.id);
+      await updateDoc(userRef, { password: passwords.new });
       toast.success('Password changed successfully!');
       setIsChangePasswordOpen(false);
       setPasswords({ old: '', new: '', confirm: '' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.id}`);
     }
   };
 
-  const refreshBalance = () => {
-    const users: UserType[] = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    const currentUser = users.find(u => u.phone === user.phone);
-    if (currentUser) setBalance(currentUser.balance);
-    toast.success('Balance updated!');
+  const refreshBalance = async () => {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', user.id));
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as UserType;
+        setBalance(userData.balance);
+        toast.success('Balance updated!');
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `users/${user.id}`);
+    }
   };
 
   const handleAction = (action: string) => {
@@ -87,13 +91,11 @@ export default function Profile({ onNavigate, onLogout, user }: ProfileProps) {
       case 'Withdraw': onNavigate('history-withdraw'); break;
       case 'Change Password': setIsChangePasswordOpen(true); break;
       case 'Whatsapp Support': {
-        const support = JSON.parse(localStorage.getItem('lakshmi_support') || '{"whatsapp": "+91 9999999999"}');
-        window.open(`https://wa.me/${support.whatsapp.replace(/\s+/g, '')}`, '_blank');
+        window.open(`https://wa.me/919999999999`, '_blank');
         break;
       }
       case 'Customer Support Online 24/7': {
-        const support = JSON.parse(localStorage.getItem('lakshmi_support') || '{"customerSupport": "LakshmiSupport"}');
-        window.open(`https://t.me/${support.customerSupport}`, '_blank');
+        window.open(`https://t.me/LakshmiSupport`, '_blank');
         break;
       }
       default: toast.info(`${action} feature is coming soon!`);
@@ -270,6 +272,14 @@ export default function Profile({ onNavigate, onLogout, user }: ProfileProps) {
             onClick={onLogout}
           >
             <LogOut className="w-4 h-4 mr-2" /> Log Out
+          </Button>
+
+          <Button 
+            variant="ghost" 
+            className="w-full h-12 text-red-400 hover:bg-red-400/10 font-bold rounded-full"
+            onClick={onClearCache}
+          >
+            <RefreshCw className="w-4 h-4 mr-2" /> Clear Cache
           </Button>
         </div>
       </motion.div>

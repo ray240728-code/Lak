@@ -15,7 +15,7 @@ interface AdminPanelProps {
   onNavigate: (page: any) => void;
 }
 
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, onSnapshot, query, orderBy, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, where, getDocs } from 'firebase/firestore';
 
 export default function AdminPanel({ onNavigate }: AdminPanelProps) {
@@ -88,17 +88,17 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
     // Real-time users
     const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       setUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'users'));
 
     // Real-time banners
     const unsubscribeBanners = onSnapshot(query(collection(db, 'banners'), orderBy('order', 'asc')), (snapshot) => {
       setBanners(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'banners'));
 
     // Real-time activities
     const unsubscribeActivities = onSnapshot(query(collection(db, 'activities'), orderBy('createdAt', 'desc')), (snapshot) => {
       setActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'activities'));
 
     // Real-time settings
     const unsubscribeSettings = onSnapshot(doc(db, 'config', 'settings'), (docSnap) => {
@@ -107,13 +107,31 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
         setSettings(prev => ({ ...prev, ...data }));
         setPopupBanner(docSnap.data().popupBanner || '');
       }
-    });
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'config/settings'));
+
+    // Real-time giftcards
+    const unsubscribeGiftCards = onSnapshot(query(collection(db, 'giftcards'), orderBy('createdAt', 'desc')), (snapshot) => {
+      setGiftCards(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as GiftCard)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'giftcards'));
+
+    // Real-time deposits
+    const unsubscribeDeposits = onSnapshot(query(collection(db, 'deposits'), orderBy('createdAt', 'desc')), (snapshot) => {
+      setDeposits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepositRequest)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'deposits'));
+
+    // Real-time withdrawals
+    const unsubscribeWithdrawals = onSnapshot(query(collection(db, 'withdrawals'), orderBy('createdAt', 'desc')), (snapshot) => {
+      setWithdrawals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WithdrawalRequest)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'withdrawals'));
 
     return () => {
       unsubscribeUsers();
       unsubscribeBanners();
       unsubscribeActivities();
       unsubscribeSettings();
+      unsubscribeGiftCards();
+      unsubscribeDeposits();
+      unsubscribeWithdrawals();
     };
   }, []);
 
@@ -270,34 +288,36 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
     }
   };
 
-  const handleAddGiftCard = () => {
+  const handleAddGiftCard = async () => {
     if (!newGiftCard.code || newGiftCard.amount <= 0) {
       toast.error('Please enter a valid code and amount');
       return;
     }
-    const card: GiftCard = {
-      id: Math.random().toString(36).substr(2, 9),
-      code: newGiftCard.code,
-      amount: newGiftCard.amount,
-      minDeposit: newGiftCard.minDeposit,
-      status: 'available',
-      maxUses: 1,
-      usedCount: 0,
-      claimedBy: [],
-      createdAt: Date.now()
-    };
-    const updated = [card, ...giftCards];
-    setGiftCards(updated);
-    localStorage.setItem('lakshmi_giftcards', JSON.stringify(updated));
-    setNewGiftCard({ code: '', amount: 0, minDeposit: 0 });
-    toast.success('Gift card created successfully');
+    try {
+      await addDoc(collection(db, 'giftcards'), {
+        code: newGiftCard.code,
+        amount: newGiftCard.amount,
+        minDeposit: newGiftCard.minDeposit,
+        status: 'available',
+        maxUses: 1,
+        usedCount: 0,
+        claimedBy: [],
+        createdAt: Date.now()
+      });
+      setNewGiftCard({ code: '', amount: 0, minDeposit: 0 });
+      toast.success('Gift card created successfully');
+    } catch (error) {
+      toast.error('Failed to create gift card');
+    }
   };
 
-  const handleRemoveGiftCard = (id: string) => {
-    const updated = giftCards.filter(c => c.id !== id);
-    setGiftCards(updated);
-    localStorage.setItem('lakshmi_giftcards', JSON.stringify(updated));
-    toast.success('Gift card removed');
+  const handleRemoveGiftCard = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'giftcards', id));
+      toast.success('Gift card removed');
+    } catch (error) {
+      toast.error('Failed to remove gift card');
+    }
   };
 
   const handleSaveSupport = () => {

@@ -8,23 +8,27 @@ import { toast } from 'sonner';
 interface LoginProps {
   onNavigate: (page: any) => void;
   onLogin: (phone: string, password: string) => void;
+  onGoogleLogin: () => void;
+  loading?: boolean;
 }
 
-export default function Login({ onNavigate, onLogin }: LoginProps) {
+export default function Login({ onNavigate, onLogin, onGoogleLogin, loading }: LoginProps) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = () => {
-    if (!phone) {
+    const trimmedPhone = phone.trim();
+    const trimmedPassword = password.trim();
+    if (!trimmedPhone) {
       toast.error('Please enter your phone number');
       return;
     }
-    if (!password) {
+    if (!trimmedPassword) {
       toast.error('Please enter your password');
       return;
     }
-    onLogin(phone, password);
+    onLogin(trimmedPhone, trimmedPassword);
   };
 
   return (
@@ -105,8 +109,13 @@ export default function Login({ onNavigate, onLogin }: LoginProps) {
           <Button 
             className="w-full h-12 bg-blue-400 hover:bg-blue-500 text-white font-bold text-lg rounded-full"
             onClick={handleLogin}
+            disabled={loading}
           >
-            Log in
+            {loading ? (
+              <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              'Log in'
+            )}
           </Button>
           <Button 
             variant="outline" 
@@ -115,10 +124,34 @@ export default function Login({ onNavigate, onLogin }: LoginProps) {
           >
             Register
           </Button>
+
+          <div className="relative py-4">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-blue-900/50"></div>
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-[#2b3270] px-2 text-blue-300">Or continue with</span>
+            </div>
+          </div>
+
+          <Button 
+            variant="outline" 
+            className="w-full h-12 border-blue-400 text-blue-400 hover:bg-blue-400/10 font-bold rounded-full flex items-center justify-center gap-2"
+            onClick={onGoogleLogin}
+            disabled={loading}
+          >
+            <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
+            Login with Google
+          </Button>
         </div>
 
         <div className="flex justify-around pt-10">
-          <button className="flex flex-col items-center gap-2 text-blue-300">
+          <button 
+            className="flex flex-col items-center gap-2 text-blue-300"
+            onClick={() => toast.info('Please contact support to reset your password.', {
+              description: 'Admin can also reset your password from the Admin Panel.'
+            })}
+          >
             <div className="w-10 h-10 rounded-full bg-[#3a448c] flex items-center justify-center">
               <Lock className="w-5 h-5" />
             </div>

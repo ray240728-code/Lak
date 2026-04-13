@@ -5,34 +5,57 @@ import { ChevronLeft, Search, Filter, Calendar } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Transaction, Bet } from '../types';
 
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+
 interface HistoryPageProps {
   title: string;
   type: 'bet' | 'transaction' | 'deposit' | 'withdrawal';
   onBack: () => void;
+  user: any;
 }
 
-export default function HistoryPage({ title, type, onBack }: HistoryPageProps) {
+export default function HistoryPage({ title, type, onBack, user }: HistoryPageProps) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const loadData = () => {
-      setLoading(true);
-      let data: any[] = [];
-      if (type === 'bet') {
-        data = JSON.parse(localStorage.getItem('lakshmi_bets') || '[]');
-      } else if (type === 'transaction') {
-        data = JSON.parse(localStorage.getItem('lakshmi_transactions') || '[]');
-      } else if (type === 'deposit') {
-        data = JSON.parse(localStorage.getItem('lakshmi_deposits') || '[]');
-      } else if (type === 'withdrawal') {
-        data = JSON.parse(localStorage.getItem('lakshmi_withdrawals') || '[]');
-      }
-      setItems(data);
+    if (!user) return;
+    
+    setLoading(true);
+    let collectionName = '';
+    if (type === 'bet') collectionName = 'bets';
+    else if (type === 'transaction') collectionName = 'transactions';
+    else if (type === 'deposit') collectionName = 'deposits';
+    else if (type === 'withdrawal') collectionName = 'withdrawals';
+
+    if (!collectionName) {
+      setItems([]);
       setLoading(false);
-    };
-    loadData();
-  }, [type]);
+      return;
+    }
+
+    try {
+      const q = query(
+        collection(db, collectionName),
+        where('userId', 'in', [user.id, user.phone].filter(Boolean)),
+        orderBy('createdAt', 'desc')
+      );
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        setLoading(false);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, collectionName);
+        setLoading(false);
+      });
+
+      return () => unsubscribe();
+    } catch (err) {
+      console.error("Error setting up history query:", err);
+      setLoading(false);
+    }
+  }, [type, user]);
 
   const formatDate = (timestamp: number) => {
     return new Date(timestamp).toLocaleString();

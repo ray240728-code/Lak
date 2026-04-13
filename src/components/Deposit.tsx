@@ -13,12 +13,16 @@ interface DepositProps {
   user: User;
 }
 
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+
 export default function Deposit({ onBack, user }: DepositProps) {
   const [amount, setAmount] = useState('');
   const [step, setStep] = useState(1);
   const [utr, setUtr] = useState('');
   const [orderNumber, setOrderNumber] = useState('');
   const [timeLeft, setTimeLeft] = useState(300); // 5 minutes in seconds
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [settings, setSettings] = useState<AppSettings>({
     minDeposit: 100,
     minWithdrawal: 200,
@@ -73,28 +77,33 @@ export default function Deposit({ onBack, user }: DepositProps) {
     setStep(2);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!utr || utr.length < 12) {
       toast.error('Please enter a valid 12-digit UTR number');
       return;
     }
 
-    const user = JSON.parse(localStorage.getItem('lakshmi_auth') || '{}');
-    const newRequest: DepositRequest = {
-      id: 'D' + Date.now(),
-      userId: user.phone,
-      amount: parseFloat(amount),
-      utr,
-      status: 'pending',
-      timestamp: Date.now(),
-      orderNumber
-    };
+    setIsSubmitting(true);
+    try {
+      const newRequest = {
+        userId: user.id,
+        phone: user.phone,
+        amount: parseFloat(amount),
+        utr,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        orderNumber
+      };
 
-    const savedRequests = JSON.parse(localStorage.getItem('lakshmi_deposits') || '[]');
-    localStorage.setItem('lakshmi_deposits', JSON.stringify([newRequest, ...savedRequests]));
+      await addDoc(collection(db, 'deposits'), newRequest);
 
-    toast.success('Deposit request submitted! Admin will verify soon.');
-    onBack();
+      toast.success('Deposit request submitted! Admin will verify soon.');
+      onBack();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'deposits');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const copyToClipboard = (text: string, label: string) => {
