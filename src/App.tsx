@@ -78,7 +78,17 @@ export default function App() {
         navigate('home');
       }
     } catch (error: any) {
-      toast.error('Login failed. Please check your credentials.');
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+        if (phone === '9999999999') {
+          toast.error('Admin account not found in the new system. Please click REGISTER to create it for the first time.');
+        } else {
+          toast.error('Invalid credentials. If you haven\'t registered yet, please click Register.');
+        }
+      } else if (error.code === 'auth/unauthorized-domain') {
+        toast.error('Domain not authorized. Please add this domain to Firebase Authorized Domains.');
+      } else {
+        toast.error('Login failed. Please check your credentials.');
+      }
       console.error(error);
     }
   };

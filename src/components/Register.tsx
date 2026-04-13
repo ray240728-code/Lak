@@ -29,8 +29,8 @@ export default function Register({ onNavigate, onRegister }: RegisterProps) {
       toast.error('Please enter a valid phone number');
       return;
     }
-    if (!password || password.length < 6) {
-      toast.error('Password must be at least 6 characters');
+    if (!password || password.length < 5) {
+      toast.error('Password must be at least 5 characters');
       return;
     }
     onRegister(phone, password, inviteCode);
