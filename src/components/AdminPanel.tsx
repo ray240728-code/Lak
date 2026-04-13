@@ -23,6 +23,8 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [banners, setBanners] = useState<string[]>([]);
   const [newBannerUrl, setNewBannerUrl] = useState('');
+  const [popupBanner, setPopupBanner] = useState<string>('');
+  const [newPopupUrl, setNewPopupUrl] = useState('');
   
   // Prediction state
   const [predictions, setPredictions] = useState<any[]>([]);
@@ -168,6 +170,9 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
     const savedWithdrawals = JSON.parse(localStorage.getItem('lakshmi_withdrawals') || '[]');
     setWithdrawals(savedWithdrawals);
 
+    const savedPopup = localStorage.getItem('lakshmi_popup_banner') || '';
+    setPopupBanner(savedPopup);
+
     // Load real users from localStorage
     const savedUsers = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
     setUsers(savedUsers);
@@ -302,6 +307,23 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
     setBanners(updatedBanners);
     localStorage.setItem('lakshmi_banners', JSON.stringify(updatedBanners));
     toast.success('Banner removed');
+  };
+
+  const handleUpdatePopup = () => {
+    if (!newPopupUrl) {
+      toast.error('Please enter a URL');
+      return;
+    }
+    setPopupBanner(newPopupUrl);
+    localStorage.setItem('lakshmi_popup_banner', newPopupUrl);
+    setNewPopupUrl('');
+    toast.success('Pop-up banner updated');
+  };
+
+  const handleRemovePopup = () => {
+    setPopupBanner('');
+    localStorage.removeItem('lakshmi_popup_banner');
+    toast.success('Pop-up banner removed');
   };
 
   const handleAddActivity = () => {
@@ -776,6 +798,46 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
                     </Button>
                   </div>
                 ))}
+              </div>
+
+              <div className="pt-4 border-t border-blue-800/30 space-y-4">
+                <h3 className="text-sm font-bold text-white">Pop-up Banner (Shows on load)</h3>
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <label className="text-[10px] text-blue-300">Upload Image or Enter URL</label>
+                    <Input 
+                      type="file"
+                      accept="image/*"
+                      className="bg-blue-900/30 border-blue-800/50 text-white text-xs h-8"
+                      onChange={(e) => handleImageUpload(e, (url) => setNewPopupUrl(url))}
+                    />
+                    <div className="flex gap-2">
+                      <Input 
+                        placeholder="Pop-up Banner Image URL" 
+                        className="bg-blue-900/30 border-blue-800/50 text-white"
+                        value={newPopupUrl}
+                        onChange={(e) => setNewPopupUrl(e.target.value)}
+                      />
+                      <Button onClick={handleUpdatePopup} className="bg-blue-500">
+                        Update
+                      </Button>
+                    </div>
+                  </div>
+                  {popupBanner && (
+                    <div className="relative group">
+                      <img src={popupBanner} className="w-full h-40 object-cover rounded border border-blue-500/30" referrerPolicy="no-referrer" />
+                      <Button 
+                        variant="destructive" 
+                        size="icon" 
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={handleRemovePopup}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                      <p className="text-[10px] text-blue-300 mt-1 truncate">{popupBanner}</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </Card>
           </TabsContent>

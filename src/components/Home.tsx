@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Bell, ChevronRight, MessageSquare, Timer, Wallet, Trophy, TrendingUp, ShieldCheck, Gamepad2, Star, Users, Gift, Headphones, ChevronLeft } from 'lucide-react';
+import { Bell, ChevronRight, MessageSquare, Timer, Wallet, Trophy, TrendingUp, ShieldCheck, Gamepad2, Star, Users, Gift, Headphones, ChevronLeft, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Layout from './Layout';
 
@@ -10,17 +10,46 @@ interface HomeProps {
 }
 
 export default function Home({ onNavigate }: HomeProps) {
-  const [banners, setBanners] = useState<string[]>(() => {
-    const saved = localStorage.getItem('lakshmi_banners');
-    return saved ? JSON.parse(saved) : [
+  const [banners, setBanners] = useState<string[]>([]);
+  const [activities, setActivities] = useState<any[]>([]);
+  const [showPopup, setShowPopup] = useState(false);
+  const [popupBanner, setPopupBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Load banners
+    const savedBanners = localStorage.getItem('lakshmi_banners');
+    setBanners(savedBanners ? JSON.parse(savedBanners) : [
       'https://picsum.photos/seed/lakshmi1/1920/1080',
       'https://picsum.photos/seed/lakshmi2/1920/1080'
-    ];
-  });
+    ]);
+
+    // Load activities
+    const savedActivities = localStorage.getItem('lakshmi_activities');
+    if (savedActivities) {
+      setActivities(JSON.parse(savedActivities));
+    } else {
+      const defaultActivities = [
+        { id: '1', title: 'Welcome Bonus', imageUrl: 'https://picsum.photos/seed/bonus/400/200' },
+        { id: '2', title: 'Daily Rewards', imageUrl: 'https://picsum.photos/seed/daily/400/200' }
+      ];
+      setActivities(defaultActivities);
+    }
+
+    // Load pop-up banner
+    const savedPopup = localStorage.getItem('lakshmi_popup_banner');
+    if (savedPopup) {
+      setPopupBanner(savedPopup);
+      // Check if already shown in this session to avoid annoying users too much, 
+      // but user asked for "every time opening the website"
+      // We'll show it once per component mount (which happens on page load)
+      setShowPopup(true);
+    }
+  }, []);
 
   const [currentBanner, setCurrentBanner] = useState(0);
 
   useEffect(() => {
+    if (banners.length === 0) return;
     const interval = setInterval(() => {
       setCurrentBanner((prev) => (prev + 1) % banners.length);
     }, 5000);
@@ -29,6 +58,40 @@ export default function Home({ onNavigate }: HomeProps) {
 
   return (
     <Layout onNavigate={onNavigate} activeTab="home">
+      {/* Pop-up Banner Modal */}
+      <AnimatePresence>
+        {showPopup && popupBanner && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.5, opacity: 0 }}
+              className="relative max-w-sm w-full bg-[#2b3270] rounded-3xl overflow-hidden shadow-2xl border border-blue-500/30"
+            >
+              <button 
+                onClick={() => setShowPopup(false)}
+                className="absolute top-4 right-4 z-10 w-8 h-8 bg-black/50 rounded-full flex items-center justify-center text-white hover:bg-black/70 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <img 
+                src={popupBanner} 
+                alt="Announcement" 
+                className="w-full aspect-[4/5] object-cover"
+                referrerPolicy="no-referrer"
+              />
+              <div className="p-6 text-center">
+                <Button 
+                  className="w-full h-12 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full shadow-lg shadow-blue-900/40"
+                  onClick={() => setShowPopup(false)}
+                >
+                  CLOSE
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -206,31 +269,19 @@ export default function Home({ onNavigate }: HomeProps) {
             </Button>
           </div>
           <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-            {(() => {
-              const savedActivitiesStr = localStorage.getItem('lakshmi_activities');
-              let displayActivities = [];
-              if (savedActivitiesStr === null) {
-                displayActivities = [
-                  { id: '1', title: 'Welcome Bonus', imageUrl: 'https://picsum.photos/seed/bonus/400/200' },
-                  { id: '2', title: 'Daily Rewards', imageUrl: 'https://picsum.photos/seed/daily/400/200' }
-                ];
-              } else {
-                displayActivities = JSON.parse(savedActivitiesStr).slice(0, 3);
-              }
-              return displayActivities.map((activity: any) => (
-                <motion.div 
-                  key={activity.id}
-                  whileTap={{ scale: 0.98 }}
-                  className="min-w-[200px] h-28 bg-[#2b3270] rounded-xl overflow-hidden relative border border-blue-900/50 flex-shrink-0"
-                  onClick={() => onNavigate('activity')}
-                >
-                  <img src={activity.imageUrl} alt={activity.title} className="absolute inset-0 w-full h-full object-cover opacity-60" referrerPolicy="no-referrer" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent p-3 flex flex-col justify-end">
-                    <h4 className="text-xs font-bold text-white truncate">{activity.title}</h4>
-                  </div>
-                </motion.div>
-              ));
-            })()}
+            {activities.slice(0, 3).map((activity: any) => (
+              <motion.div 
+                key={activity.id}
+                whileTap={{ scale: 0.98 }}
+                className="min-w-[200px] h-28 bg-[#2b3270] rounded-xl overflow-hidden relative border border-blue-900/50 flex-shrink-0"
+                onClick={() => onNavigate('activity')}
+              >
+                <img src={activity.imageUrl} alt={activity.title} className="absolute inset-0 w-full h-full object-cover opacity-60" referrerPolicy="no-referrer" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent p-3 flex flex-col justify-end">
+                  <h4 className="text-xs font-bold text-white truncate">{activity.title}</h4>
+                </div>
+              </motion.div>
+            ))}
           </div>
         </div>
       </motion.div>
