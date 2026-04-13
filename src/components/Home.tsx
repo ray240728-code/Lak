@@ -9,6 +9,9 @@ interface HomeProps {
   onNavigate: (page: any) => void;
 }
 
+import { db } from '../firebase';
+import { collection, onSnapshot, query, orderBy, doc, getDoc } from 'firebase/firestore';
+
 export default function Home({ onNavigate }: HomeProps) {
   const [banners, setBanners] = useState<string[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
@@ -16,34 +19,53 @@ export default function Home({ onNavigate }: HomeProps) {
   const [popupBanner, setPopupBanner] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load banners
-    const savedBanners = localStorage.getItem('lakshmi_banners');
-    setBanners(savedBanners ? JSON.parse(savedBanners) : [
-      'https://picsum.photos/seed/lakshmi1/1920/1080',
-      'https://picsum.photos/seed/lakshmi2/1920/1080'
-    ]);
+    // Load banners from Firestore
+    const bannersRef = collection(db, 'banners');
+    const qBanners = query(bannersRef, orderBy('order', 'asc'));
+    const unsubscribeBanners = onSnapshot(qBanners, (snapshot) => {
+      const bannerUrls = snapshot.docs.map(doc => doc.data().url);
+      if (bannerUrls.length > 0) {
+        setBanners(bannerUrls);
+      } else {
+        setBanners([
+          'https://picsum.photos/seed/lakshmi1/1920/1080',
+          'https://picsum.photos/seed/lakshmi2/1920/1080'
+        ]);
+      }
+    });
 
-    // Load activities
-    const savedActivities = localStorage.getItem('lakshmi_activities');
-    if (savedActivities) {
-      setActivities(JSON.parse(savedActivities));
-    } else {
-      const defaultActivities = [
-        { id: '1', title: 'Welcome Bonus', imageUrl: 'https://picsum.photos/seed/bonus/400/200' },
-        { id: '2', title: 'Daily Rewards', imageUrl: 'https://picsum.photos/seed/daily/400/200' }
-      ];
-      setActivities(defaultActivities);
-    }
+    // Load activities from Firestore
+    const activitiesRef = collection(db, 'activities');
+    const qActivities = query(activitiesRef, orderBy('createdAt', 'desc'));
+    const unsubscribeActivities = onSnapshot(qActivities, (snapshot) => {
+      const activityData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      if (activityData.length > 0) {
+        setActivities(activityData);
+      } else {
+        setActivities([
+          { id: '1', title: 'Welcome Bonus', imageUrl: 'https://picsum.photos/seed/bonus/400/200' },
+          { id: '2', title: 'Daily Rewards', imageUrl: 'https://picsum.photos/seed/daily/400/200' }
+        ]);
+      }
+    });
 
-    // Load pop-up banner
-    const savedPopup = localStorage.getItem('lakshmi_popup_banner');
-    if (savedPopup) {
-      setPopupBanner(savedPopup);
-      // Check if already shown in this session to avoid annoying users too much, 
-      // but user asked for "every time opening the website"
-      // We'll show it once per component mount (which happens on page load)
-      setShowPopup(true);
-    }
+    // Load pop-up banner from Firestore config
+    const configRef = doc(db, 'config', 'settings');
+    const unsubscribeConfig = onSnapshot(configRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.popupBanner) {
+          setPopupBanner(data.popupBanner);
+          setShowPopup(true);
+        }
+      }
+    });
+
+    return () => {
+      unsubscribeBanners();
+      unsubscribeActivities();
+      unsubscribeConfig();
+    };
   }, []);
 
   const [currentBanner, setCurrentBanner] = useState(0);

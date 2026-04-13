@@ -15,19 +15,44 @@ interface AdminPanelProps {
   onNavigate: (page: any) => void;
 }
 
+import { db } from '../firebase';
+import { collection, onSnapshot, query, orderBy, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, where, getDocs } from 'firebase/firestore';
+
 export default function AdminPanel({ onNavigate }: AdminPanelProps) {
   const [users, setUsers] = useState<any[]>([]);
   const [bets, setBets] = useState<any[]>([]);
   const [deposits, setDeposits] = useState<DepositRequest[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [banners, setBanners] = useState<string[]>([]);
+  const [banners, setBanners] = useState<any[]>([]);
   const [newBannerUrl, setNewBannerUrl] = useState('');
   const [popupBanner, setPopupBanner] = useState<string>('');
   const [newPopupUrl, setNewPopupUrl] = useState('');
   
   // Prediction state
   const [predictions, setPredictions] = useState<any[]>([]);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [newActivity, setNewActivity] = useState({ title: '', description: '', imageUrl: '', type: 'banner' as 'banner' | 'offer' });
+  const [giftCards, setGiftCards] = useState<GiftCard[]>([]);
+  const [newGiftCard, setNewGiftCard] = useState({ code: '', amount: 0, minDeposit: 0 });
+  const [settings, setSettings] = useState<AppSettings>({
+    minDeposit: 100,
+    minWithdrawal: 200,
+    adminUpi: 'lakshmi.club@upi',
+    whatsapp: '+91 9999999999',
+    customerSupport: 'LakshmiSupport'
+  });
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, callback: (url: string) => void) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        callback(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   useEffect(() => {
     const updatePredictions = () => {
@@ -37,7 +62,6 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
         const currentRoundId = getRoundId(mode, now);
         const currentResult = generateRoundResult(currentRoundId);
         
-        // Calculate next round ID
         let nextTime = now + 60000;
         if (mode === '30sec') nextTime = now + 30000;
         if (mode === '3min') nextTime = now + 180000;
@@ -57,297 +81,193 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
 
     updatePredictions();
     const interval = setInterval(updatePredictions, 1000);
-
-    // Backfill history for admin view
-    const savedHistory = JSON.parse(localStorage.getItem('lakshmi_history') || '[]');
-    const modes: GameMode[] = ['30sec', '1min', '3min', '5min'];
-    const now = Date.now();
-    let newHistory = [...savedHistory];
-    let hasChanges = false;
-    
-    modes.forEach(mode => {
-      const modeHistory = newHistory.filter(h => h.mode === mode);
-      if (modeHistory.length < 20) {
-        let intervalMs = 60000;
-        if (mode === '30sec') intervalMs = 30000;
-        if (mode === '3min') intervalMs = 180000;
-        if (mode === '5min') intervalMs = 300000;
-
-        for (let i = 1; i <= 50; i++) {
-          const pastTime = now - (i * intervalMs);
-          const roundId = getRoundId(mode, pastTime);
-          if (!newHistory.find(r => r.id === roundId)) {
-            const result = generateRoundResult(roundId);
-            newHistory.push({
-              id: roundId,
-              mode: mode,
-              startTime: pastTime - intervalMs,
-              endTime: pastTime,
-              resultColor: result.color,
-              resultNumber: result.number,
-              resultBigSmall: result.bigSmall,
-              status: 'completed'
-            });
-            hasChanges = true;
-          }
-        }
-      }
-    });
-    
-    if (hasChanges) {
-      newHistory.sort((a, b) => b.id.localeCompare(a.id));
-      localStorage.setItem('lakshmi_history', JSON.stringify(newHistory.slice(0, 500)));
-    }
-
     return () => clearInterval(interval);
   }, []);
-  
-  // Activity state
-  const [activities, setActivities] = useState<ActivityItem[]>([]);
-  const [newActivity, setNewActivity] = useState({ title: '', description: '', imageUrl: '', type: 'banner' as 'banner' | 'offer' });
-  
-  // Gift Card state
-  const [giftCards, setGiftCards] = useState<GiftCard[]>([]);
-  const [newGiftCard, setNewGiftCard] = useState({ code: '', amount: 0, minDeposit: 0 });
-
-  // App Settings
-  const [settings, setSettings] = useState<AppSettings>({
-    minDeposit: 100,
-    minWithdrawal: 200,
-    adminUpi: 'lakshmi.club@upi',
-    whatsapp: '+91 9999999999',
-    customerSupport: 'LakshmiSupport'
-  });
 
   useEffect(() => {
-    // Mock loading data from localStorage
-    const savedBets = JSON.parse(localStorage.getItem('lakshmi_bets') || '[]');
-    setBets(savedBets);
+    // Real-time users
+    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      setUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
 
-    const savedBanners = JSON.parse(localStorage.getItem('lakshmi_banners') || '[]');
-    setBanners(savedBanners.length > 0 ? savedBanners : [
-      'https://picsum.photos/seed/lakshmi1/1920/1080',
-      'https://picsum.photos/seed/lakshmi2/1920/1080'
-    ]);
+    // Real-time banners
+    const unsubscribeBanners = onSnapshot(query(collection(db, 'banners'), orderBy('order', 'asc')), (snapshot) => {
+      setBanners(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
 
-    const savedActivitiesStr = localStorage.getItem('lakshmi_activities');
-    if (savedActivitiesStr === null) {
-      const defaultActivities = [
-        {
-          id: '1',
-          title: 'Welcome Bonus',
-          description: 'Get ₹100 on your first deposit!',
-          imageUrl: 'https://picsum.photos/seed/bonus/800/400',
-          type: 'banner',
-          createdAt: Date.now()
-        },
-        {
-          id: '2',
-          title: 'Daily Check-in',
-          description: 'Claim your daily rewards now.',
-          imageUrl: 'https://picsum.photos/seed/daily/800/400',
-          type: 'offer',
-          createdAt: Date.now()
-        }
-      ];
-      setActivities(defaultActivities);
-      localStorage.setItem('lakshmi_activities', JSON.stringify(defaultActivities));
-    } else {
-      setActivities(JSON.parse(savedActivitiesStr));
-    }
+    // Real-time activities
+    const unsubscribeActivities = onSnapshot(query(collection(db, 'activities'), orderBy('createdAt', 'desc')), (snapshot) => {
+      setActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
 
-    const savedGiftCards = JSON.parse(localStorage.getItem('lakshmi_giftcards') || '[]');
-    setGiftCards(savedGiftCards);
+    // Real-time settings
+    const unsubscribeSettings = onSnapshot(doc(db, 'config', 'settings'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as AppSettings;
+        setSettings(prev => ({ ...prev, ...data }));
+        setPopupBanner(docSnap.data().popupBanner || '');
+      }
+    });
 
-    const savedSettings = JSON.parse(localStorage.getItem('lakshmi_settings') || '{}');
-    if (savedSettings.adminUpi) {
-      setSettings(prev => ({ ...prev, ...savedSettings }));
-    }
-
-    const savedDeposits = JSON.parse(localStorage.getItem('lakshmi_deposits') || '[]');
-    setDeposits(savedDeposits);
-
-    const savedWithdrawals = JSON.parse(localStorage.getItem('lakshmi_withdrawals') || '[]');
-    setWithdrawals(savedWithdrawals);
-
-    const savedPopup = localStorage.getItem('lakshmi_popup_banner') || '';
-    setPopupBanner(savedPopup);
-
-    // Load real users from localStorage
-    const savedUsers = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    setUsers(savedUsers);
+    return () => {
+      unsubscribeUsers();
+      unsubscribeBanners();
+      unsubscribeActivities();
+      unsubscribeSettings();
+    };
   }, []);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, callback: (url: string) => void) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        callback(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleUpdateBalance = (userId: string, newBalance: number) => {
-    setUsers(users.map(u => u.id === userId ? { ...u, balance: newBalance } : u));
-    toast.success(`Balance updated for user ${userId}`);
-  };
-
-  const handleSaveSettings = () => {
-    localStorage.setItem('lakshmi_settings', JSON.stringify(settings));
-    toast.success('Settings saved successfully!');
-  };
-
-  const handleApproveDeposit = (id: string) => {
-    const request = deposits.find(d => d.id === id);
-    if (!request) return;
-
-    // Update user balance in lakshmi_users
-    const users: User[] = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    const updatedUsers = users.map(u => {
-      if (u.phone === request.userId) {
-        return { 
-          ...u, 
-          balance: u.balance + request.amount,
-          totalDeposit: u.totalDeposit + request.amount
-        };
-      }
-      return u;
-    });
-    localStorage.setItem('lakshmi_users', JSON.stringify(updatedUsers));
-    setUsers(updatedUsers);
-
-    // Update request status
-    const updatedDeposits = deposits.map(d => d.id === id ? { ...d, status: 'completed' as const } : d);
-    setDeposits(updatedDeposits);
-    localStorage.setItem('lakshmi_deposits', JSON.stringify(updatedDeposits));
-
-    // Add transaction
-    const transactions = JSON.parse(localStorage.getItem('lakshmi_transactions') || '[]');
-    const newTransaction = {
-      id: 'T' + Date.now(),
-      userId: request.userId,
-      type: 'deposit' as const,
-      amount: request.amount,
-      status: 'completed' as const,
-      timestamp: Date.now(),
-      description: 'Deposit Approved',
-      orderNumber: request.orderNumber
-    };
-    localStorage.setItem('lakshmi_transactions', JSON.stringify([newTransaction, ...transactions]));
-
-    toast.success('Deposit approved!');
-  };
-
-  const handleRejectDeposit = (id: string) => {
-    const updatedDeposits = deposits.map(d => d.id === id ? { ...d, status: 'failed' as const } : d);
-    setDeposits(updatedDeposits);
-    localStorage.setItem('lakshmi_deposits', JSON.stringify(updatedDeposits));
-    toast.error('Deposit rejected!');
-  };
-
-  const handleApproveWithdrawal = (id: string) => {
-    const updatedWithdrawals = withdrawals.map(w => w.id === id ? { ...w, status: 'completed' as const } : w);
-    setWithdrawals(updatedWithdrawals);
-    localStorage.setItem('lakshmi_withdrawals', JSON.stringify(updatedWithdrawals));
-
-    // Add transaction
-    const request = withdrawals.find(w => w.id === id);
-    if (request) {
-      const transactions = JSON.parse(localStorage.getItem('lakshmi_transactions') || '[]');
-      const newTransaction = {
-        id: 'T' + Date.now(),
-        userId: request.userId,
-        type: 'withdrawal' as const,
-        amount: request.amount,
-        status: 'completed' as const,
-        timestamp: Date.now(),
-        description: 'Withdrawal Approved',
-        orderNumber: request.orderNumber
-      };
-      localStorage.setItem('lakshmi_transactions', JSON.stringify([newTransaction, ...transactions]));
-    }
-
-    toast.success('Withdrawal approved!');
-  };
-
-  const handleRejectWithdrawal = (id: string) => {
-    const request = withdrawals.find(w => w.id === id);
-    if (!request) return;
-
-    // Refund balance in lakshmi_users
-    const users: User[] = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    const updatedUsers = users.map(u => {
-      if (u.phone === request.userId) {
-        return { ...u, balance: u.balance + request.amount };
-      }
-      return u;
-    });
-    localStorage.setItem('lakshmi_users', JSON.stringify(updatedUsers));
-    setUsers(updatedUsers);
-
-    const updatedWithdrawals = withdrawals.map(w => w.id === id ? { ...w, status: 'failed' as const } : w);
-    setWithdrawals(updatedWithdrawals);
-    localStorage.setItem('lakshmi_withdrawals', JSON.stringify(updatedWithdrawals));
-    toast.error('Withdrawal rejected and balance refunded!');
-  };
-
-  const handleAddBanner = () => {
+  const handleAddBanner = async () => {
     if (!newBannerUrl) return;
-    const updatedBanners = [...banners, newBannerUrl];
-    setBanners(updatedBanners);
-    localStorage.setItem('lakshmi_banners', JSON.stringify(updatedBanners));
-    setNewBannerUrl('');
-    toast.success('Banner added successfully');
+    try {
+      await addDoc(collection(db, 'banners'), {
+        url: newBannerUrl,
+        order: banners.length,
+        createdAt: Date.now()
+      });
+      setNewBannerUrl('');
+      toast.success('Banner added successfully');
+    } catch (error) {
+      toast.error('Failed to add banner');
+    }
   };
 
-  const handleRemoveBanner = (index: number) => {
-    const updatedBanners = banners.filter((_, i) => i !== index);
-    setBanners(updatedBanners);
-    localStorage.setItem('lakshmi_banners', JSON.stringify(updatedBanners));
-    toast.success('Banner removed');
+  const handleRemoveBanner = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'banners', id));
+      toast.success('Banner removed');
+    } catch (error) {
+      toast.error('Failed to remove banner');
+    }
   };
 
-  const handleUpdatePopup = () => {
+  const handleUpdatePopup = async () => {
     if (!newPopupUrl) {
       toast.error('Please enter a URL');
       return;
     }
-    setPopupBanner(newPopupUrl);
-    localStorage.setItem('lakshmi_popup_banner', newPopupUrl);
-    setNewPopupUrl('');
-    toast.success('Pop-up banner updated');
+    try {
+      await setDoc(doc(db, 'config', 'settings'), { popupBanner: newPopupUrl }, { merge: true });
+      setPopupBanner(newPopupUrl);
+      setNewPopupUrl('');
+      toast.success('Pop-up banner updated');
+    } catch (error) {
+      toast.error('Failed to update pop-up');
+    }
   };
 
-  const handleRemovePopup = () => {
-    setPopupBanner('');
-    localStorage.removeItem('lakshmi_popup_banner');
-    toast.success('Pop-up banner removed');
+  const handleRemovePopup = async () => {
+    try {
+      await updateDoc(doc(db, 'config', 'settings'), { popupBanner: '' });
+      setPopupBanner('');
+      toast.success('Pop-up banner removed');
+    } catch (error) {
+      toast.error('Failed to remove pop-up');
+    }
   };
 
-  const handleAddActivity = () => {
+  const handleAddActivity = async () => {
     if (!newActivity.title || !newActivity.imageUrl) {
       toast.error('Please fill in title and image URL/Upload');
       return;
     }
-    const activity: ActivityItem = {
-      id: Math.random().toString(36).substr(2, 9),
-      ...newActivity,
-      createdAt: Date.now()
-    };
-    const updated = [activity, ...activities];
-    setActivities(updated);
-    localStorage.setItem('lakshmi_activities', JSON.stringify(updated));
-    setNewActivity({ title: '', description: '', imageUrl: '', type: 'banner' });
-    toast.success('Activity added successfully');
+    try {
+      await addDoc(collection(db, 'activities'), {
+        ...newActivity,
+        createdAt: Date.now()
+      });
+      setNewActivity({ title: '', description: '', imageUrl: '', type: 'banner' });
+      toast.success('Activity added successfully');
+    } catch (error) {
+      toast.error('Failed to add activity');
+    }
   };
 
-  const handleRemoveActivity = (id: string) => {
-    const updated = activities.filter(a => a.id !== id);
-    setActivities(updated);
-    localStorage.setItem('lakshmi_activities', JSON.stringify(updated));
-    toast.success('Activity removed');
+  const handleRemoveActivity = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'activities', id));
+      toast.success('Activity removed');
+    } catch (error) {
+      toast.error('Failed to remove activity');
+    }
+  };
+
+  const handleUpdateBalance = async (userId: string, newBalance: number) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { balance: newBalance });
+      toast.success('Balance updated');
+    } catch (error) {
+      toast.error('Failed to update balance');
+    }
+  };
+
+  const handleApproveDeposit = async (id: string) => {
+    const request = deposits.find(d => d.id === id);
+    if (!request) return;
+
+    try {
+      const userRef = doc(db, 'users', request.userId);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        await updateDoc(userRef, {
+          balance: (userData.balance || 0) + request.amount,
+          totalDeposit: (userData.totalDeposit || 0) + request.amount
+        });
+      }
+
+      await updateDoc(doc(db, 'deposits', id), { status: 'completed' });
+      toast.success('Deposit approved!');
+    } catch (error) {
+      toast.error('Failed to approve deposit');
+    }
+  };
+
+  const handleRejectDeposit = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'deposits', id), { status: 'failed' });
+      toast.error('Deposit rejected');
+    } catch (error) {
+      toast.error('Failed to reject deposit');
+    }
+  };
+
+  const handleApproveWithdrawal = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'withdrawals', id), { status: 'completed' });
+      toast.success('Withdrawal approved!');
+    } catch (error) {
+      toast.error('Failed to approve withdrawal');
+    }
+  };
+
+  const handleRejectWithdrawal = async (id: string) => {
+    const request = withdrawals.find(w => w.id === id);
+    if (!request) return;
+
+    try {
+      const userRef = doc(db, 'users', request.userId);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        await updateDoc(userRef, {
+          balance: (userData.balance || 0) + request.amount
+        });
+      }
+      await updateDoc(doc(db, 'withdrawals', id), { status: 'failed' });
+      toast.error('Withdrawal rejected and balance refunded!');
+    } catch (error) {
+      toast.error('Failed to reject withdrawal');
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    try {
+      await setDoc(doc(db, 'config', 'settings'), settings, { merge: true });
+      toast.success('Settings saved successfully!');
+    } catch (error) {
+      toast.error('Failed to save settings');
+    }
   };
 
   const handleAddGiftCard = () => {
@@ -784,15 +704,15 @@ export default function AdminPanel({ onNavigate }: AdminPanelProps) {
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-3">
-                {banners.map((url, index) => (
-                  <div key={index} className="flex items-center gap-3 p-2 bg-blue-900/20 rounded-lg border border-blue-800/30">
-                    <img src={url} alt="Banner" className="w-20 h-12 object-cover rounded" referrerPolicy="no-referrer" />
-                    <span className="flex-1 text-[10px] text-blue-300 truncate">{url}</span>
+                {banners.map((banner) => (
+                  <div key={banner.id} className="flex items-center gap-3 p-2 bg-blue-900/20 rounded-lg border border-blue-800/30">
+                    <img src={banner.url} alt="Banner" className="w-20 h-12 object-cover rounded" referrerPolicy="no-referrer" />
+                    <span className="flex-1 text-[10px] text-blue-300 truncate">{banner.url}</span>
                     <Button 
                       variant="ghost" 
                       size="icon" 
                       className="text-red-400 hover:text-red-300"
-                      onClick={() => handleRemoveBanner(index)}
+                      onClick={() => handleRemoveBanner(banner.id)}
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>

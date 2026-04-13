@@ -25,111 +25,132 @@ type Page = 'login' | 'register' | 'home' | 'activity' | 'wallet' | 'promotion' 
 
 import { User } from './types';
 
+import { auth, db } from './firebase';
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { doc, getDoc, setDoc, updateDoc, increment, collection, query, where, getDocs } from 'firebase/firestore';
+
 export default function App() {
-  const [currentPage, setCurrentPage] = useState<Page>(() => {
-    const saved = localStorage.getItem('lakshmi_auth');
-    return saved ? 'home' : 'login';
-  });
-  const [user, setUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('lakshmi_auth');
-    if (!saved) return null;
-    const authData = JSON.parse(saved);
-    const users: User[] = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    return users.find(u => u.phone === authData.phone) || null;
-  });
+  const [currentPage, setCurrentPage] = useState<Page>('login');
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+        if (userDoc.exists()) {
+          setUser(userDoc.data() as User);
+          setCurrentPage('home');
+        } else {
+          // Handle case where auth exists but firestore doc doesn't
+          setUser(null);
+          setCurrentPage('login');
+        }
+      } else {
+        setUser(null);
+        setCurrentPage('login');
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const navigate = (page: any) => setCurrentPage(page);
 
-  const handleLogin = (phone: string, password?: string) => {
-    const users: User[] = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    const foundUser = users.find(u => u.phone === phone);
-
-    if (!foundUser) {
-      toast.error('User not found. Please register first.');
-      return;
-    }
-
-    if (password && foundUser.password !== password) {
-      toast.error('Incorrect password.');
-      return;
-    }
-
-    if (foundUser.status === 'blocked') {
-      toast.error('Your account has been blocked. Contact support.');
-      return;
-    }
-
-    setUser(foundUser);
-    localStorage.setItem('lakshmi_auth', JSON.stringify({ phone: foundUser.phone }));
-    toast.success('Login successful!');
-    navigate('home');
-  };
-
-  const handleRegister = (phone: string, password?: string, inviteCode?: string) => {
-    const users: User[] = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    
-    if (users.find(u => u.phone === phone)) {
-      toast.error('Phone number already registered.');
-      return;
-    }
-
-    const newUser: User = {
-      id: Math.random().toString(36).substr(2, 9),
-      phone,
-      password,
-      name: `Member${Math.floor(10000 + Math.random() * 90000)}`,
-      balance: 0,
-      status: 'active',
-      totalDeposit: 0,
-      role: phone === '9999999999' ? 'admin' : 'user', // Default admin for testing
-      referredBy: inviteCode || undefined,
-      referralCount: 0,
-      createdAt: Date.now()
-    };
-
-    let updatedUsers = [...users, newUser];
-
-    // Increment referral count for the referrer if inviteCode exists
-    if (inviteCode) {
-      updatedUsers = updatedUsers.map(u => {
-        if (u.id === inviteCode || u.phone === inviteCode) {
-          return { ...u, referralCount: (u.referralCount || 0) + 1 };
+  const handleLogin = async (phone: string, password?: string) => {
+    if (!password) return;
+    try {
+      // Firebase Auth uses email, so we use phone@lakshmi.club as a dummy email
+      const email = `${phone}@lakshmi.club`;
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as User;
+        if (userData.status === 'blocked') {
+          await signOut(auth);
+          toast.error('Your account has been blocked. Contact support.');
+          return;
         }
-        return u;
-      });
+        setUser(userData);
+        toast.success('Login successful!');
+        navigate('home');
+      }
+    } catch (error: any) {
+      toast.error('Login failed. Please check your credentials.');
+      console.error(error);
     }
-
-    localStorage.setItem('lakshmi_users', JSON.stringify(updatedUsers));
-    
-    toast.success('Registration successful! Please login.');
-    navigate('login');
   };
 
-  const handleLogout = () => {
-    setUser(null);
-    localStorage.removeItem('lakshmi_auth');
-    navigate('login');
-  };
+  const handleRegister = async (phone: string, password?: string, inviteCode?: string) => {
+    if (!password) return;
+    try {
+      const email = `${phone}@lakshmi.club`;
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const uid = userCredential.user.uid;
 
-  // Initialize default admin if no users exist
-  useEffect(() => {
-    const users = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-    if (users.length === 0) {
-      const adminUser: User = {
-        id: 'admin',
-        phone: '9999999999',
-        password: 'admin',
-        name: 'Admin',
-        balance: 5000,
+      const newUser: User = {
+        id: uid,
+        phone,
+        password, // Storing for legacy reasons, though Auth handles it
+        name: `Member${Math.floor(10000 + Math.random() * 90000)}`,
+        balance: 0,
         status: 'active',
         totalDeposit: 0,
-        role: 'admin',
+        role: phone === '9999999999' ? 'admin' : 'user',
+        referredBy: inviteCode || undefined,
         referralCount: 0,
         createdAt: Date.now()
       };
-      localStorage.setItem('lakshmi_users', JSON.stringify([adminUser]));
+
+      await setDoc(doc(db, 'users', uid), newUser);
+
+      // Handle referral logic
+      if (inviteCode) {
+        // Find referrer by ID or Phone
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('id', '==', inviteCode));
+        const qPhone = query(usersRef, where('phone', '==', inviteCode));
+        
+        const [querySnapshot, querySnapshotPhone] = await Promise.all([
+          getDocs(q),
+          getDocs(qPhone)
+        ]);
+
+        const referrerDoc = querySnapshot.docs[0] || querySnapshotPhone.docs[0];
+        if (referrerDoc) {
+          await updateDoc(doc(db, 'users', referrerDoc.id), {
+            referralCount: increment(1)
+          });
+        }
+      }
+
+      toast.success('Registration successful! Please login.');
+      navigate('login');
+    } catch (error: any) {
+      if (error.code === 'auth/email-already-in-use') {
+        toast.error('Phone number already registered.');
+      } else {
+        toast.error('Registration failed. Please try again.');
+      }
+      console.error(error);
     }
-  }, []);
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    setUser(null);
+    navigate('login');
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#1a1a2e] flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#1a1a2e] text-white font-sans overflow-x-hidden">

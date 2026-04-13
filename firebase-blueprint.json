@@ -1,0 +1,100 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Application user profile and balance",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "phone": { "type": "string" },
+        "password": { "type": "string" },
+        "name": { "type": "string" },
+        "balance": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "blocked"] },
+        "totalDeposit": { "type": "number" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "referredBy": { "type": "string" },
+        "referralCount": { "type": "number" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "phone", "password", "name", "balance", "status", "role", "createdAt"]
+    },
+    "Banner": {
+      "title": "Banner",
+      "description": "Home page slider banners",
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "order": { "type": "number" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["url", "order", "createdAt"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "Offers and events",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "type": { "type": "string", "enum": ["banner", "offer"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "title", "imageUrl", "type", "createdAt"]
+    },
+    "AppConfig": {
+      "title": "AppConfig",
+      "description": "Global application settings and pop-up banner",
+      "type": "object",
+      "properties": {
+        "popupBanner": { "type": "string" },
+        "minDeposit": { "type": "number" },
+        "minWithdrawal": { "type": "number" },
+        "adminUpi": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "customerSupport": { "type": "string" }
+      }
+    },
+    "Bet": {
+      "title": "Bet",
+      "description": "User game bets",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "roundId": { "type": "string" },
+        "mode": { "type": "string" },
+        "amount": { "type": "number" },
+        "selection": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "win", "loss"] },
+        "winAmount": { "type": "number" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "roundId", "mode", "amount", "selection", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/banners/{bannerId}": {
+      "schema": "Banner",
+      "description": "Home banners"
+    },
+    "/activities/{activityId}": {
+      "schema": "Activity",
+      "description": "Offers and events"
+    },
+    "/config/settings": {
+      "schema": "AppConfig",
+      "description": "Global app settings"
+    },
+    "/bets/{betId}": {
+      "schema": "Bet",
+      "description": "Game bets"
+    }
+  }
+}
