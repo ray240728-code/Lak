@@ -70,9 +70,9 @@ export const getRoundId = (mode: GameMode, timestamp: number): string => {
   
   let interval = 1;
   let modeCode = '01';
-  if (mode === '30sec') { interval = 0.5; modeCode = '30'; }
   if (mode === '3min') { interval = 3; modeCode = '03'; }
   if (mode === '5min') { interval = 5; modeCode = '05'; }
+  if (mode === '10min') { interval = 10; modeCode = '10'; }
   
   const totalMinutes = date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
   const roundNum = Math.floor(totalMinutes / interval);

@@ -69,10 +69,90 @@
         "amount": { "type": "number" },
         "selection": { "type": "string" },
         "status": { "type": "string", "enum": ["pending", "win", "loss"] },
-        "winAmount": { "type": "number" },
-        "createdAt": { "type": "number" }
+        "payout": { "type": "number" },
+        "timestamp": { "type": "number" }
       },
-      "required": ["id", "userId", "roundId", "mode", "amount", "selection", "status", "createdAt"]
+      "required": ["id", "userId", "roundId", "mode", "amount", "selection", "status", "timestamp"]
+    },
+    "GameHistory": {
+      "title": "GameHistory",
+      "description": "Completed game rounds results",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "mode": { "type": "string" },
+        "resultNumber": { "type": "number" },
+        "resultColor": { "type": "array", "items": { "type": "string" } },
+        "resultBigSmall": { "type": "string" },
+        "startTime": { "type": "number" },
+        "endTime": { "type": "number" },
+        "status": { "type": "string" }
+      }
+    },
+    "GiftCard": {
+      "title": "GiftCard",
+      "description": "Redeemable gift codes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "amount": { "type": "number" },
+        "minDeposit": { "type": "number" },
+        "status": { "type": "string" },
+        "claimedBy": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Deposit": {
+      "title": "Deposit",
+      "description": "Deposit requests",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "utr": { "type": "string" },
+        "status": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "orderNumber": { "type": "string" }
+      }
+    },
+    "Withdrawal": {
+      "title": "Withdrawal",
+      "description": "Withdrawal requests",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "method": { "type": "string" }
+      }
+    },
+    "Prediction": {
+      "title": "Prediction",
+      "description": "Game outcome predictions for different modes",
+      "type": "object",
+      "properties": {
+        "currentRoundId": { "type": "string" },
+        "currentResult": { 
+          "type": "object",
+          "properties": {
+            "number": { "type": "number" },
+            "color": { "type": "array", "items": { "type": "string" } },
+            "bigSmall": { "type": "string" }
+          }
+        },
+        "nextRoundId": { "type": "string" },
+        "nextResult": {
+          "type": "object",
+          "properties": {
+            "number": { "type": "number" },
+            "color": { "type": "array", "items": { "type": "string" } },
+            "bigSmall": { "type": "string" }
+          }
+        }
+      }
     }
   },
   "firestore": {
@@ -92,9 +172,29 @@
       "schema": "AppConfig",
       "description": "Global app settings"
     },
+    "/config/{predictionId}": {
+      "schema": "Prediction",
+      "description": "Game predictions"
+    },
     "/bets/{betId}": {
       "schema": "Bet",
       "description": "Game bets"
+    },
+    "/game_history/{roundId}": {
+      "schema": "GameHistory",
+      "description": "Game history"
+    },
+    "/giftcards/{cardId}": {
+      "schema": "GiftCard",
+      "description": "Gift cards"
+    },
+    "/deposits/{depositId}": {
+      "schema": "Deposit",
+      "description": "Deposit requests"
+    },
+    "/withdrawals/{withdrawalId}": {
+      "schema": "Withdrawal",
+      "description": "Withdrawal requests"
     }
   }
 }

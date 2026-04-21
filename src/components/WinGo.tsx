@@ -1,17 +1,32 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { motion } from 'motion/react';
-import { Trophy, Timer, RefreshCw, TrendingUp, ShieldCheck, CircleHelp, ChevronLeft, Bell, Wallet, History, Headphones, Music, Volume2, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  Trophy, 
+  Timer, 
+  RefreshCw, 
+  ChevronLeft, 
+  Volume2, 
+  X, 
+  HelpCircle,
+  History,
+  TrendingUp,
+  User as UserIcon,
+  Wallet,
+  ArrowUpCircle,
+  ArrowDownCircle
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 import { Color, Number, Bet, GameMode, GameRound, BigSmall, User } from '../types';
 import { getRoundId, generateRoundResult, calculatePayout } from '../lib/gameLogic';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, addDoc, serverTimestamp, query, where, orderBy, onSnapshot, doc, updateDoc, increment, getDoc, limit, getDocs, setDoc, runTransaction } from 'firebase/firestore';
 
 interface WinGoProps {
   onNavigate: (page: any) => void;
@@ -23,27 +38,9 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
   const [activeMode, setActiveMode] = useState<GameMode>('1min');
   const [timeLeft, setTimeLeft] = useState<number>(60);
   const [currentRoundId, setCurrentRoundId] = useState<string>('');
-  const [history, setHistory] = useState<GameRound[]>(() => {
-    const saved = localStorage.getItem('lakshmi_history');
-    if (!saved) return [];
-    try {
-      const parsed = JSON.parse(saved);
-      if (!Array.isArray(parsed)) return [];
-      // Deduplicate by ID
-      const unique = parsed.filter((round: any, index: number, self: any[]) =>
-        index === self.findIndex((r) => r.id === round.id)
-      );
-      return unique;
-    } catch (e) {
-      return [];
-    }
-  });
-  const [myBets, setMyBets] = useState<Bet[]>(() => {
-    const saved = localStorage.getItem('lakshmi_bets');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  // Result Popup state
+  const [history, setHistory] = useState<GameRound[]>([]);
+  const [myBets, setMyBets] = useState<Bet[]>([]);
+  const [isPlacingBet, setIsPlacingBet] = useState(false);
   const [showResultPopup, setShowResultPopup] = useState(false);
   const [lastResult, setLastResult] = useState<{
     status: 'win' | 'loss';
@@ -60,130 +57,150 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
   const [selectedBet, setSelectedBet] = useState<Color | Number | BigSmall | null>(null);
   const [betAmount, setBetAmount] = useState<string>('10');
   const [multiplier, setMultiplier] = useState<number>(1);
+  const [expandedRoundId, setExpandedRoundId] = useState<string | null>(null);
+  const [expandedBetId, setExpandedBetId] = useState<string | null>(null);
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
+  const [historyTab, setHistoryTab] = useState('history');
+  const [predictionConfigs, setPredictionConfigs] = useState<Record<string, any>>({});
 
   useEffect(() => {
-    // Sync balance with Firestore if needed, but App.tsx handles the user object
-    // For now, we just ensure we don't write to localStorage
-  }, [balance, history, myBets, user.phone]);
-
-  useEffect(() => {
-    // Backfill history for all modes
-    const modes: GameMode[] = ['30sec', '1min', '3min', '5min'];
-    const now = Date.now();
-    
-    setHistory(prev => {
-      let updatedHistory = [...prev];
-      let hasChanges = false;
-
-      modes.forEach(mode => {
-        let intervalMs = 60000;
-        if (mode === '30sec') intervalMs = 30000;
-        if (mode === '3min') intervalMs = 180000;
-        if (mode === '5min') intervalMs = 300000;
-
-        // Ensure at least 50 rounds for EACH mode
-        const modeHistory = updatedHistory.filter(h => h.mode === mode);
-        if (modeHistory.length < 50) {
-          for (let i = 1; i <= 50; i++) {
-            const pastTime = now - (i * intervalMs);
-            const roundId = getRoundId(mode, pastTime);
-            
-            if (!updatedHistory.find(r => r.id === roundId)) {
-              const result = generateRoundResult(roundId);
-              const pastRound: GameRound = {
-                id: roundId,
-                mode: mode,
-                startTime: pastTime - intervalMs,
-                endTime: pastTime,
-                resultColor: result.color,
-                resultNumber: result.number,
-                resultBigSmall: result.bigSmall,
-                status: 'completed'
-              };
-              updatedHistory.push(pastRound);
-              hasChanges = true;
-            }
-          }
-        }
-      });
-
-      if (hasChanges) {
-        // Sort history by ID descending
-        updatedHistory.sort((a, b) => b.id.localeCompare(a.id));
-        // Keep a reasonable amount of history (e.g., 500 rounds)
-        return updatedHistory.slice(0, 500);
+    const unsubscribeBalance = onSnapshot(doc(db, 'users', user.id), (docSnap) => {
+      if (docSnap.exists()) {
+        setBalance(docSnap.data().balance || 0);
       }
-      return prev;
     });
-  }, []);
 
-  const handleRoundEnd = useCallback((roundId: string, mode: GameMode) => {
-    const result = generateRoundResult(roundId);
+    const qHistory = query(collection(db, 'game_history'), orderBy('id', 'desc'), limit(100));
+    const unsubscribeHistory = onSnapshot(qHistory, (snapshot) => {
+      setHistory(snapshot.docs.map(doc => doc.data() as GameRound));
+    });
+
+    const qBets = query(collection(db, 'bets'), where('userId', '==', user.id), orderBy('timestamp', 'desc'), limit(50));
+    const unsubscribeBets = onSnapshot(qBets, (snapshot) => {
+      setMyBets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bet)));
+    });
+
+    const predictionUnsubscribes = ['1min', '3min', '5min', '10min'].map(mode => 
+      onSnapshot(doc(db, 'config', `prediction_${mode}`), (snapshot) => {
+        if (snapshot.exists()) {
+          setPredictionConfigs(prev => ({ ...prev, [mode]: snapshot.data() }));
+        }
+      })
+    );
+
+    return () => {
+      unsubscribeBalance();
+      unsubscribeHistory();
+      unsubscribeBets();
+      predictionUnsubscribes.forEach(unsub => unsub());
+    };
+  }, [user.id]);
+
+  const handleRoundEnd = useCallback(async (roundId: string, mode: GameMode) => {
+    let result = generateRoundResult(roundId);
+    
+    // FETCH LIVE PREDICTION (Override if admin set one)
+    // Check both slots in case of transition
+    const predData = predictionConfigs[mode];
+    if (predData) {
+      if (predData.currentRoundId === roundId && predData.currentResult) {
+        result = predData.currentResult;
+      } else if (predData.nextRoundId === roundId && predData.nextResult) {
+        result = predData.nextResult;
+      }
+    }
+
     const newRound: GameRound = {
       id: roundId,
       mode: mode,
-      startTime: Date.now() - (mode === '30sec' ? 30000 : mode === '1min' ? 60000 : mode === '3min' ? 180000 : 300000),
+      startTime: Date.now() - (mode === '1min' ? 60000 : mode === '3min' ? 180000 : mode === '5min' ? 300000 : 600000),
       endTime: Date.now(),
       resultColor: result.color,
       resultNumber: result.number,
       resultBigSmall: result.bigSmall,
       status: 'completed'
     };
-    setHistory(prev => {
-      if (prev.some(r => r.id === roundId)) return prev;
-      return [newRound, ...prev].slice(0, 200); // Keep more history
-    });
-    setMyBets(prev => {
-      let totalWon = 0;
-      let totalLost = 0;
-      const updatedBets = prev.map(bet => {
-        if (bet.roundId === roundId && bet.status === 'pending') {
-          const payout = calculatePayout(bet, result);
-          if (payout > 0) {
-            totalWon += payout;
-            return { ...bet, status: 'win', payout } as Bet;
-          }
-          totalLost += bet.amount;
-          return { ...bet, status: 'loss', payout: 0 } as Bet;
+
+    try {
+      const q = query(collection(db, 'bets'), where('roundId', '==', roundId), where('status', '==', 'pending'));
+      const querySnapshot = await getDocs(q);
+      if (querySnapshot.empty) {
+        // Even if no bets, we still want to record the game history once
+        const historyRef = doc(db, 'game_history', roundId);
+        const historySnap = await getDoc(historyRef);
+        if (!historySnap.exists()) {
+          await setDoc(historyRef, newRound);
         }
-        return bet;
+        return;
+      }
+      
+      await runTransaction(db, async (transaction) => {
+        const historyRef = doc(db, 'game_history', roundId);
+        const historySnap = await transaction.get(historyRef);
+        if (!historySnap.exists()) {
+          transaction.set(historyRef, newRound);
+        }
+
+        for (const betDoc of querySnapshot.docs) {
+          const betRef = doc(db, 'bets', betDoc.id);
+          // CRITICAL: Must re-read status inside transaction to prevent double payouts
+          const freshBetSnap = await transaction.get(betRef);
+          if (!freshBetSnap.exists() || freshBetSnap.data()?.status !== 'pending') continue;
+
+          const betData = freshBetSnap.data() as Bet;
+          const payout = calculatePayout(betData, result);
+          const status = payout > 0 ? 'win' : 'loss';
+          
+          transaction.update(betRef, {
+            status,
+            payout,
+            result: {
+              number: result.number,
+              color: result.color,
+              bigSmall: result.bigSmall
+            }
+          });
+
+          if (payout > 0) {
+            const userRef = doc(db, 'users', betData.userId);
+            transaction.update(userRef, { balance: increment(payout) });
+            if (betData.userId === user.id) {
+              setLastResult({
+                status: 'win',
+                amount: payout,
+                roundId: roundId,
+                number: result.number,
+                color: result.color,
+                bigSmall: result.bigSmall
+              });
+              setShowResultPopup(true);
+            }
+          } else if (betData.userId === user.id) {
+            setLastResult({
+              status: 'loss',
+              amount: betData.amount,
+              roundId: roundId,
+              number: result.number,
+              color: result.color,
+              bigSmall: result.bigSmall
+            });
+            setShowResultPopup(true);
+          }
+        }
       });
-
-      // Show popup if user had a bet in this round
-      const userBet = prev.find(b => b.roundId === roundId && b.status === 'pending');
-      if (userBet) {
-        setLastResult({
-          status: totalWon > 0 ? 'win' : 'loss',
-          amount: totalWon > 0 ? totalWon : totalLost,
-          roundId: roundId,
-          number: result.number,
-          color: result.color,
-          bigSmall: result.bigSmall
-        });
-        setTimeout(() => setShowResultPopup(true), 1000);
-      }
-
-      if (totalWon > 0) {
-        setBalance(curr => curr + totalWon);
-        toast.success(`You won ₹${totalWon.toFixed(2)}!`, {
-          description: `Round ${roundId} result: ${result.number}`,
-          icon: <Trophy className="w-5 h-5 text-yellow-500" />
-        });
-      }
-      return updatedBets;
-    });
-  }, [activeMode]);
+    } catch (error) {
+      console.error("Error processing round end:", error);
+    }
+  }, [user.id, predictionConfigs]);
 
   useEffect(() => {
-    // Initialize currentRoundId for the active mode
     setCurrentRoundId(getRoundId(activeMode, Date.now()));
-
     const interval = setInterval(() => {
       const now = Date.now();
       let modeSeconds = 60;
-      if (activeMode === '30sec') modeSeconds = 30;
       if (activeMode === '3min') modeSeconds = 180;
       if (activeMode === '5min') modeSeconds = 300;
+      if (activeMode === '10min') modeSeconds = 600;
       
       const secondsPassed = Math.floor(now / 1000) % modeSeconds;
       const remaining = modeSeconds - secondsPassed;
@@ -191,10 +208,7 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
       
       const newRoundId = getRoundId(activeMode, now);
       if (newRoundId !== currentRoundId) {
-        // Only trigger handleRoundEnd if we have a valid previous round ID for THIS mode
-        // We check if currentRoundId matches the current mode's ID format
-        const modeCode = activeMode === '30sec' ? '30' : activeMode === '3min' ? '03' : activeMode === '5min' ? '05' : '01';
-        if (currentRoundId && currentRoundId.includes(modeCode)) {
+        if (currentRoundId) {
           handleRoundEnd(currentRoundId, activeMode);
         }
         setCurrentRoundId(newRoundId);
@@ -203,26 +217,33 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
     return () => clearInterval(interval);
   }, [activeMode, currentRoundId, handleRoundEnd]);
 
-  const placeBet = () => {
+  const placeBet = async () => {
     const amount = parseFloat(betAmount) * multiplier;
     if (isNaN(amount) || amount <= 0 || amount > balance || selectedBet === null) {
       toast.error('Invalid bet or insufficient balance');
       return;
     }
-    const newBet: Bet = {
-      id: Math.random().toString(36).substr(2, 9),
-      roundId: currentRoundId,
-      mode: activeMode,
-      amount,
-      selection: selectedBet,
-      timestamp: Date.now(),
-      status: 'pending'
-    };
-    
-    setBalance(prev => prev - amount);
-    setMyBets(prev => [newBet, ...prev]);
-    setBetModalOpen(false);
-    toast.success('Bet placed!');
+
+    setIsPlacingBet(true);
+    try {
+      const newBet = {
+        userId: user.id,
+        roundId: currentRoundId,
+        mode: activeMode,
+        amount,
+        selection: selectedBet,
+        timestamp: serverTimestamp(),
+        status: 'pending'
+      };
+      await updateDoc(doc(db, 'users', user.id), { balance: increment(-amount) });
+      await addDoc(collection(db, 'bets'), newBet);
+      setBetModalOpen(false);
+      toast.success('Bet placed!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'bets');
+    } finally {
+      setIsPlacingBet(false);
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -232,412 +253,475 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[#0f143c] flex flex-col pb-20 font-sans">
+    <div className="min-h-screen bg-[#f8f3f3] flex flex-col font-sans text-gray-900 overflow-x-hidden">
       {/* Header */}
-      <div className="p-4 flex items-center justify-between text-white bg-[#0f143c] sticky top-0 z-10">
-        <Button variant="ghost" size="icon" onClick={() => onNavigate('home')} className="text-white">
+      <div className="p-4 flex items-center justify-between bg-[#ff4d4d] text-white sticky top-0 z-50">
+        <button onClick={() => onNavigate('home')}>
           <ChevronLeft className="w-6 h-6" />
-        </Button>
-        <div className="flex items-center gap-2 font-black text-2xl tracking-tight">
-          <span className="bg-gradient-to-r from-blue-400 to-blue-200 bg-clip-text text-transparent">Lakshmi</span>
-          <span className="text-white">Club</span>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="ghost" size="icon" className="text-white"><Headphones className="w-5 h-5" /></Button>
-          <Button variant="ghost" size="icon" className="text-white"><Music className="w-5 h-5" /></Button>
-        </div>
+        </button>
+        <h1 className="text-lg font-bold">Win Go</h1>
+        <HelpCircle className="w-6 h-6" />
       </div>
 
-      {/* Balance Section */}
-      <div className="px-4 py-2">
-        <Card className="border-none bg-[#2b3270] text-white shadow-xl p-6 space-y-6 rounded-3xl">
-          <div className="flex flex-col items-center gap-2">
-            <div className="flex items-center gap-3">
-              <h2 className="text-3xl font-bold tracking-tight">₹{balance.toFixed(2)}</h2>
-              <RefreshCw className="w-5 h-5 text-blue-300 cursor-pointer hover:rotate-180 transition-transform duration-500" onClick={() => toast.success('Balance updated!')} />
-            </div>
-            <p className="text-xs text-blue-200 flex items-center gap-2 font-medium opacity-80">
-              <Wallet className="w-4 h-4" /> Wallet balance
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-6">
-            <Button className="bg-[#ff4d4d] hover:bg-[#ff3333] text-white rounded-full h-12 font-bold text-lg shadow-lg shadow-red-900/20" onClick={() => onNavigate('wallet')}>Withdraw</Button>
-            <Button className="bg-[#2ecc71] hover:bg-[#27ae60] text-white rounded-full h-12 font-bold text-lg shadow-lg shadow-green-900/20" onClick={() => onNavigate('wallet')}>Deposit</Button>
-          </div>
-        </Card>
-      </div>
-
-      {/* Announcement Bar */}
-      <div className="px-4 py-2">
-        <div className="bg-[#1a1f4d] rounded-full px-4 py-2 flex items-center gap-3 text-blue-200 overflow-hidden">
-          <Volume2 className="w-4 h-4 flex-shrink-0 text-blue-400" />
-          <div className="flex-1 overflow-hidden">
-            <motion.p 
-              animate={{ x: [300, -300] }}
-              transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
-              className="text-[10px] whitespace-nowrap font-medium"
-            >
-              Welcome to Lakshmi Club! Enjoy the best gaming experience with us.
-            </motion.p>
-          </div>
-          <Button size="sm" className="h-6 rounded-full bg-blue-500 text-[10px] px-3 hover:bg-blue-600">
-            <span className="flex items-center gap-1">🔥 Detail</span>
-          </Button>
-        </div>
-      </div>
-
-      {/* Mode Selection */}
-      <div className="px-2 py-4 overflow-x-auto no-scrollbar">
-        <div className="flex gap-1.5 justify-between">
-          {[
-            { id: '30sec', label: 'WinGo 30sec' },
-            { id: '1min', label: 'WinGo 1 Min' },
-            { id: '3min', label: 'WinGo 3 Min' },
-            { id: '5min', label: 'WinGo 5 Min' },
-          ].map((mode) => (
-            <motion.div 
-              key={mode.id}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setActiveMode(mode.id as GameMode)}
-              className={`flex flex-col items-center justify-center gap-1.5 p-2 rounded-xl cursor-pointer transition-all flex-1 min-w-[80px] ${activeMode === mode.id ? 'bg-gradient-to-b from-[#3b82f6] to-[#1d4ed8] text-white shadow-lg' : 'bg-[#1e264f] text-[#4d63a3]'}`}
-            >
-              <div className={`w-9 h-9 rounded-full flex items-center justify-center ${activeMode === mode.id ? 'bg-white/20' : 'bg-[#151b3d]'}`}>
-                <Timer className={`w-5 h-5 ${activeMode === mode.id ? 'text-white' : 'text-[#4d63a3]'}`} />
+      <div className="flex-1">
+        {/* Balance Card */}
+        <div className="px-4 pt-4">
+          <div className="bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] rounded-2xl p-6 text-center shadow-lg relative overflow-hidden">
+            <div className="relative z-10 flex flex-col items-center gap-1">
+              <div className="flex items-center gap-2">
+                <span className="text-3xl font-black text-white italic">₹{balance.toFixed(2)}</span>
+                <RefreshCw className="w-5 h-5 text-white/70 cursor-pointer active:rotate-180 transition-transform" />
               </div>
-              <span className="text-[8px] font-black whitespace-nowrap text-center leading-none uppercase tracking-tighter">{mode.label}</span>
-            </motion.div>
-          ))}
-        </div>
-      </div>
-
-      {/* Game Board - Ticket Design */}
-      <div className="px-4 space-y-4">
-        <div className="relative bg-[#2b3270] rounded-2xl shadow-2xl overflow-hidden p-6 space-y-6">
-          {/* Ticket Cutouts */}
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-8 bg-[#0f143c] rounded-r-full" />
-          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-8 bg-[#0f143c] rounded-l-full" />
-          
-          <div className="flex justify-between items-center relative gap-2">
-            {/* Left Side */}
-            <div className="space-y-4 flex-1">
-              <Button variant="outline" size="sm" className="h-8 text-[11px] border-blue-500/50 text-blue-100 rounded-full px-4 bg-blue-900/20 hover:bg-blue-900/40 backdrop-blur-sm transition-all duration-300">
-                <CircleHelp className="w-4 h-4 mr-2 text-blue-400" /> How to play
-              </Button>
-              <div className="space-y-2">
-                <p className="text-sm font-bold text-white opacity-90">WinGo {activeMode === '30sec' ? '30sec' : activeMode === '1min' ? '1 Min' : activeMode === '3min' ? '3 Min' : '5 Min'}</p>
-                <div className="flex gap-1 flex-wrap">
-                  {filteredHistory.slice(0, 5).map((h, i) => (
-                    <motion.div 
-                      key={i} 
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ delay: i * 0.1 }}
-                      className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white shadow-lg ${h.resultNumber % 2 === 0 ? 'bg-gradient-to-br from-[#ff4d4d] to-[#cc0000]' : 'bg-gradient-to-br from-[#2ecc71] to-[#27ae60]'}`}
-                    >
-                      {h.resultNumber}
-                    </motion.div>
-                  ))}
-                </div>
+              <p className="text-[10px] font-bold text-white/80 uppercase tracking-widest">Wallet balance</p>
+              <div className="grid grid-cols-2 gap-4 w-full mt-6">
+                <Button className="bg-white text-[#ff4d4d] hover:bg-white/90 rounded-full h-11 font-black text-sm shadow-md" onClick={() => onNavigate('withdraw')}>Withdraw</Button>
+                <Button className="bg-white text-[#ff4d4d] hover:bg-white/90 rounded-full h-11 font-black text-sm shadow-md" onClick={() => onNavigate('deposit')}>Deposit</Button>
               </div>
             </div>
+            {/* Background elements */}
+            <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full" />
+            <div className="absolute -left-4 -bottom-4 w-20 h-20 bg-white/5 rounded-full" />
+          </div>
+        </div>
 
-            {/* Vertical Dashed Line */}
-            <div className="h-20 border-l border-dashed border-blue-400/30 mx-2" />
+        {/* Announcement Bar */}
+        <div className="px-4 py-3">
+          <div className="bg-white rounded-full px-4 py-2 flex items-center gap-3 text-gray-500 shadow-sm border border-gray-100 overflow-hidden">
+            <Volume2 className="w-4 h-4 flex-shrink-0 text-red-400" />
+            <div className="flex-1 overflow-hidden">
+              <motion.p 
+                animate={{ x: [400, -400] }}
+                transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+                className="text-[11px] whitespace-nowrap font-bold"
+              >
+                Welcome to Lakshmi Club! Enjoy the best gaming experience with us.
+              </motion.p>
+            </div>
+          </div>
+        </div>
 
-            {/* Right Side - Time Box */}
-            <div className="text-right space-y-3 flex-1">
-              <p className="text-[11px] text-blue-200 font-bold opacity-80 uppercase tracking-wider">Time remaining</p>
-              <div className="flex gap-1 justify-end">
+        {/* Mode Selection Tabs */}
+        <div className="px-4 py-1">
+          <div className="flex bg-white rounded-xl p-1 shadow-sm border border-gray-50">
+            {[
+              { id: '1min', label: 'Win Go 1Min' },
+              { id: '3min', label: 'Win Go 3Min' },
+              { id: '5min', label: 'Win Go 5Min' },
+              { id: '10min', label: 'Win Go 10Min' },
+            ].map((mode) => (
+              <button 
+                key={mode.id}
+                onClick={() => setActiveMode(mode.id as GameMode)}
+                className={`flex-1 py-3 rounded-lg text-[9px] font-black tracking-tight transition-all ${activeMode === mode.id ? 'bg-gradient-to-b from-[#ff7e7e] to-[#ff4d4d] text-white shadow-md' : 'text-gray-400'}`}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Timer Section */}
+        <div className="px-4 mt-4">
+          <div className="bg-white rounded-2xl p-6 shadow-sm flex justify-between items-center border border-gray-50 relative overflow-hidden">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 bg-gray-50 text-gray-400 text-[10px] font-bold uppercase tracking-widest border border-gray-100 px-3 py-1 rounded-full w-fit">
+                <HelpCircle className="w-3 h-3" />
+                <span>How to play</span>
+              </div>
+              <div>
+                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-1">Win Go {activeMode}</p>
+                <p className="text-lg font-black text-gray-800 tracking-tighter">{currentRoundId}</p>
+              </div>
+            </div>
+            <div className="text-right space-y-2">
+              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Time remaining</p>
+              <div className="flex gap-1.5 justify-end">
                 {formatTime(timeLeft).split('').map((char, i) => (
-                  <div 
-                    key={i} 
-                    className={`w-6 h-9 flex items-center justify-center rounded-lg text-lg font-black ${char === ':' ? 'text-blue-400 w-2' : 'bg-[#1a1f4d] text-white border border-blue-900/50'}`}
-                  >
+                  <div key={i} className={`h-11 flex items-center justify-center rounded-lg text-2xl font-black ${char === ':' ? 'text-red-500 w-2' : 'w-7 bg-red-50 text-[#ff4d4d] border border-red-100/50'}`}>
                     {char}
                   </div>
                 ))}
               </div>
-              <p className="text-[12px] font-mono font-bold text-white tracking-widest opacity-80">{currentRoundId}</p>
             </div>
           </div>
+        </div>
 
-          <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-3">
-              <Button onClick={() => { setSelectedBet('green'); setBetModalOpen(true); }} className="h-10 bg-green-500 hover:bg-green-600 text-white font-bold rounded-lg">Green</Button>
-              <Button onClick={() => { setSelectedBet('violet'); setBetModalOpen(true); }} className="h-10 bg-purple-500 hover:bg-purple-600 text-white font-bold rounded-lg">Violet</Button>
-              <Button onClick={() => { setSelectedBet('red'); setBetModalOpen(true); }} className="h-10 bg-red-500 hover:bg-red-600 text-white font-bold rounded-lg">Red</Button>
+        {/* Betting Section */}
+        <div className="px-4 space-y-4 mt-4">
+          <div className="bg-white rounded-2xl p-6 shadow-sm space-y-8 border border-gray-100">
+            <div className="grid grid-cols-3 gap-4">
+              <Button onClick={() => { setSelectedBet('green'); setBetModalOpen(true); }} className="h-10 bg-[#38A169] hover:bg-green-600 text-white font-black rounded-xl shadow-sm text-xs uppercase tracking-widest border-none">Green</Button>
+              <Button onClick={() => { setSelectedBet('violet'); setBetModalOpen(true); }} className="h-10 bg-[#805AD5] hover:bg-purple-600 text-white font-black rounded-xl shadow-sm text-xs uppercase tracking-widest border-none">Violet</Button>
+              <Button onClick={() => { setSelectedBet('red'); setBetModalOpen(true); }} className="h-10 bg-[#ff4d4d] hover:bg-red-600 text-white font-black rounded-xl shadow-sm text-xs uppercase tracking-widest border-none">Red</Button>
             </div>
             
-            <div className="grid grid-cols-5 gap-3">
+            <div className="grid grid-cols-5 gap-y-6 gap-x-3">
               {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                <motion.button 
-                  key={num}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => { setSelectedBet(num as Number); setBetModalOpen(true); }}
-                  className={`relative w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold shadow-xl border-2 border-white/10 overflow-hidden`}
-                >
-                  {num === 0 ? (
-                    <div className="absolute inset-0 flex">
-                      <div className="w-1/2 h-full bg-red-500" />
-                      <div className="w-1/2 h-full bg-purple-500" />
-                    </div>
-                  ) : num === 5 ? (
-                    <div className="absolute inset-0 flex">
-                      <div className="w-1/2 h-full bg-green-500" />
-                      <div className="w-1/2 h-full bg-purple-500" />
-                    </div>
-                  ) : (
-                    <div className={`absolute inset-0 ${num % 2 === 0 ? 'bg-red-500' : 'bg-green-500'}`} />
-                  )}
-                  <span className="relative z-10 text-white">{num}</span>
-                </motion.button>
+                <div key={num} className="flex justify-center">
+                  <motion.button 
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => { setSelectedBet(num as Number); setBetModalOpen(true); }}
+                    className={`relative w-14 h-14 rounded-full flex items-center justify-center text-xl font-black shadow-lg overflow-hidden border-2 border-white ${
+                      num === 0 ? 'bg-gradient-to-br from-[#ff4d4d] to-[#805AD5]' :
+                      num === 5 ? 'bg-gradient-to-br from-[#38A169] to-[#805AD5]' :
+                      num % 2 === 0 ? 'bg-[#ff4d4d]' : 'bg-[#38A169]'
+                    }`}
+                  >
+                    <span className="text-white drop-shadow-md">{num}</span>
+                  </motion.button>
+                </div>
               ))}
             </div>
 
             <div className="flex flex-wrap gap-2 justify-center">
-              {['Random', 'X1', 'X5', 'X10', 'X20', 'X50', 'X100'].map((m) => (
-                <Button 
+              {['Random', 'History', 'X1', 'X5', 'X10', 'X20', 'X50', 'X100'].map((m) => (
+                <button 
                   key={m} 
-                  variant="outline" 
-                  size="sm" 
-                  className={`h-7 text-[10px] px-3 rounded-md border-none ${m === 'X1' ? 'bg-blue-500 text-white' : 'bg-[#1a1f4d] text-blue-300'}`}
+                  className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase transition-all border ${
+                    m === 'X1' ? 'bg-[#ff4d4d] text-white border-red-300 shadow-md' : 
+                    m === 'History' ? 'bg-orange-500 text-white border-orange-300 shadow-md' :
+                    'bg-white text-gray-400 border-gray-100 hover:border-gray-200'}`}
                   onClick={() => {
                     if (m === 'Random') {
                       const randomNum = Math.floor(Math.random() * 10);
                       setSelectedBet(randomNum as Number);
                       setBetModalOpen(true);
+                    } else if (m === 'History') {
+                      setShowHistoryDrawer(true);
                     } else if (m.startsWith('X')) {
                       setMultiplier(parseInt(m.slice(1)));
                     }
                   }}
                 >
                   {m}
-                </Button>
+                </button>
               ))}
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Button onClick={() => { setSelectedBet('big'); setBetModalOpen(true); }} className="h-10 bg-[#f39c12] hover:bg-[#e67e22] text-white font-bold rounded-l-full rounded-r-none">Big</Button>
-              <Button onClick={() => { setSelectedBet('small'); setBetModalOpen(true); }} className="h-10 bg-[#3498db] hover:bg-[#2980b9] text-white font-bold rounded-r-full rounded-l-none">Small</Button>
+            <div className="grid grid-cols-2 gap-4">
+              <Button onClick={() => { setSelectedBet('big'); setBetModalOpen(true); }} className="h-12 bg-[#FF9933] hover:bg-orange-500 text-white font-black rounded-l-full shadow-lg text-sm uppercase tracking-widest border-none">Big</Button>
+              <Button onClick={() => { setSelectedBet('small'); setBetModalOpen(true); }} className="h-12 bg-[#4299E1] hover:bg-blue-600 text-white font-black rounded-r-full shadow-lg text-sm uppercase tracking-widest border-none">Small</Button>
             </div>
           </div>
         </div>
 
-        {/* History Table */}
-        <Card className="border-none bg-[#1a1f4d] shadow-2xl overflow-hidden rounded-2xl">
-          <Tabs defaultValue="history" className="w-full">
-            <TabsList className="w-full h-14 bg-[#0f143c] rounded-none border-b border-blue-900/30 p-1">
-              <TabsTrigger value="history" className="flex-1 h-full data-[state=active]:bg-blue-500 data-[state=active]:text-white rounded-xl font-bold text-xs transition-all">Game history</TabsTrigger>
-              <TabsTrigger value="chart" className="flex-1 h-full data-[state=active]:bg-blue-500 data-[state=active]:text-white rounded-xl font-bold text-xs transition-all">Chart</TabsTrigger>
-              <TabsTrigger value="mybets" className="flex-1 h-full data-[state=active]:bg-blue-500 data-[state=active]:text-white rounded-xl font-bold text-xs transition-all">My Bets</TabsTrigger>
-            </TabsList>
-            <TabsContent value="history" className="m-0">
-              <ScrollArea className="h-[500px]">
-                <Table>
-                  <TableHeader className="bg-[#0f143c]/50">
-                    <TableRow className="border-blue-900/20 hover:bg-transparent">
-                      <TableHead className="text-[11px] font-black text-blue-200 uppercase tracking-wider">Period</TableHead>
-                      <TableHead className="text-[11px] font-black text-blue-200 uppercase tracking-wider text-center">Number</TableHead>
-                      <TableHead className="text-[11px] font-black text-blue-200 uppercase tracking-wider text-center">Big Small</TableHead>
-                      <TableHead className="text-[11px] font-black text-blue-200 uppercase tracking-wider text-right">Color</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredHistory.map((round, index) => (
-                      <TableRow key={`${round.id}-${index}`} className="border-blue-900/10 hover:bg-blue-900/10 transition-colors">
-                        <TableCell className="font-mono text-[11px] text-white font-medium">{round.id}</TableCell>
-                        <TableCell className="text-center">
-                          <span className={`text-lg font-black drop-shadow-sm ${round.resultNumber % 2 === 0 ? 'text-[#ff4d4d]' : 'text-[#2ecc71]'}`}>{round.resultNumber}</span>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <span className="text-[11px] text-white font-bold capitalize opacity-90">{round.resultBigSmall}</span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1.5">
-                            {round.resultColor.map((c, i) => (
-                              <div key={i} className={`w-2.5 h-2.5 rounded-full shadow-sm ${c === 'red' ? 'bg-[#ff4d4d]' : c === 'green' ? 'bg-[#2ecc71]' : 'bg-[#9b59b6]'}`} />
-                            ))}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            </TabsContent>
-            <TabsContent value="mybets" className="m-0">
-              <ScrollArea className="h-[500px]">
-                <Table>
-                  <TableHeader className="bg-[#0f143c]/50">
-                    <TableRow className="border-blue-900/20 hover:bg-transparent">
-                      <TableHead className="text-[11px] font-black text-blue-200 uppercase tracking-wider">Period</TableHead>
-                      <TableHead className="text-[11px] font-black text-blue-200 uppercase tracking-wider text-center">Selection</TableHead>
-                      <TableHead className="text-[11px] font-black text-blue-200 uppercase tracking-wider text-center">Amount</TableHead>
-                      <TableHead className="text-[11px] font-black text-blue-200 uppercase tracking-wider text-right">Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredMyBets.map((bet, index) => (
-                      <TableRow key={`${bet.id}-${index}`} className="border-blue-900/10 hover:bg-blue-900/10 transition-colors">
-                        <TableCell className="font-mono text-[11px] text-white font-medium">{bet.roundId}</TableCell>
-                        <TableCell className="text-center">
-                          <span className="text-[11px] text-white font-bold capitalize opacity-90">{bet.selection}</span>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <span className="text-[11px] text-blue-300 font-bold">₹{bet.amount.toFixed(2)}</span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${bet.status === 'win' ? 'bg-green-500/20 text-green-400 border-green-500/30' : bet.status === 'loss' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-blue-500/20 text-blue-400 border-blue-500/30'}`}>
-                            {bet.status === 'win' ? `+₹${bet.payout?.toFixed(2)}` : bet.status === 'loss' ? '-₹' + bet.amount.toFixed(2) : 'Pending'}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            </TabsContent>
-          </Tabs>
-        </Card>
+        {/* History Button (Floating or Integrated) */}
+        <div className="px-4 mt-6 mb-8 text-center">
+          <Button 
+            variant="outline" 
+            className="w-full bg-white border-gray-100 text-gray-500 font-bold h-12 rounded-2xl flex items-center justify-center gap-2 shadow-sm"
+            onClick={() => setShowHistoryDrawer(true)}
+          >
+            <History className="w-5 h-5 text-red-400" />
+            Check Game History & My Bets
+          </Button>
+        </div>
       </div>
 
-      {/* Bet Modal */}
-      <Dialog open={betModalOpen} onOpenChange={setBetModalOpen}>
-        <DialogContent className="bg-[#2b3270] border-blue-800/50 text-white rounded-t-3xl sm:rounded-3xl p-0 overflow-hidden max-w-md">
-          <div className="p-6 space-y-6">
-            <div className="text-center space-y-2">
-              <h3 className="text-2xl font-black tracking-tight">WinGo {activeMode}</h3>
-              <div className="inline-block bg-blue-500/20 text-blue-300 px-4 py-1 rounded-full text-xs font-bold border border-blue-500/30">
-                Select {selectedBet}
+      {/* History Slide-up Panel (Full Screen) */}
+      <AnimatePresence>
+        {showHistoryDrawer && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowHistoryDrawer(false)}
+              className="fixed inset-0 bg-black/60 z-[100] backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed inset-x-0 bottom-0 top-12 bg-[#f8f3f3] z-[110] rounded-t-[2.5rem] shadow-2xl flex flex-col overflow-hidden"
+            >
+              <div className="p-4 flex items-center justify-between border-b border-gray-100 bg-white shadow-sm flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-6 bg-[#ff4d4d] rounded-full" />
+                  <h3 className="text-lg font-black text-gray-800 uppercase tracking-widest">Statistics</h3>
+                </div>
+                <button onClick={() => setShowHistoryDrawer(false)} className="p-2 bg-gray-50 rounded-full text-gray-400 hover:text-red-500 transition-colors">
+                  <X className="w-6 h-6" />
+                </button>
               </div>
-            </div>
 
+              <div className="flex-1 overflow-hidden flex flex-col">
+                <Tabs value={historyTab} onValueChange={setHistoryTab} className="flex-1 flex flex-col">
+                  <div className="px-0 flex-shrink-0 bg-white">
+                    <TabsList className="w-full h-14 bg-white rounded-none p-1 flex gap-0 border-b border-gray-100 shadow-sm">
+                      <TabsTrigger 
+                        value="history" 
+                        className="flex-1 h-full data-[state=active]:bg-[#ff4d4d] data-[state=active]:text-white text-gray-400 rounded-none font-black text-[12px] uppercase tracking-wider transition-all"
+                      >
+                        Game history
+                      </TabsTrigger>
+                      <TabsTrigger 
+                        value="chart" 
+                        className="flex-1 h-full data-[state=active]:bg-[#ff4d4d] data-[state=active]:text-white text-gray-400 rounded-none font-black text-[12px] uppercase tracking-wider transition-all"
+                      >
+                        Chart
+                      </TabsTrigger>
+                      <TabsTrigger 
+                        value="myhistory" 
+                        className="flex-1 h-full data-[state=active]:bg-[#ff4d4d] data-[state=active]:text-white text-gray-400 rounded-none font-black text-[12px] uppercase tracking-wider transition-all"
+                      >
+                        My history
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto no-scrollbar pb-10">
+                    <TabsContent value="history" className="m-0">
+                      <div className="bg-white min-h-screen">
+                        <div className="bg-[#ff4d4d] px-4 py-4 flex items-center justify-between text-[11px] font-black text-white uppercase tracking-widest sticky top-0 z-10 shadow-md">
+                          <span className="w-[40%] text-center">Period</span>
+                          <span className="w-[15%] text-center">Number</span>
+                          <span className="w-[25%] text-center">Big Small</span>
+                          <span className="w-[20%] text-center">Color</span>
+                        </div>
+                        <div className="divide-y divide-gray-50">
+                          {filteredHistory.map((round, index) => (
+                            <div key={`${round.id}-${index}`} className="flex flex-col">
+                              <div 
+                                onClick={() => setExpandedRoundId(expandedRoundId === round.id ? null : round.id)}
+                                className="px-4 py-6 flex items-center justify-between hover:bg-gray-50/50 transition-colors cursor-pointer"
+                              >
+                                <span className="w-[40%] font-bold text-[13px] text-gray-500 text-center tracking-tight">{round.id}</span>
+                                <div className="w-[15%] flex justify-center">
+                                  <span className={`text-[20px] font-black ${
+                                    round.resultNumber === 0 ? 'bg-gradient-to-b from-[#ff4d4d] to-[#805AD5] bg-clip-text text-transparent' :
+                                    round.resultNumber === 5 ? 'bg-gradient-to-b from-[#38A169] to-[#805AD5] bg-clip-text text-transparent' :
+                                    round.resultNumber % 2 === 0 ? 'text-[#ff4d4d]' : 'text-[#38A169]'
+                                  }`}>
+                                    {round.resultNumber}
+                                  </span>
+                                </div>
+                                <span className={`w-[25%] text-center text-[13px] font-bold ${round.resultBigSmall === 'big' ? 'text-orange-400' : 'text-blue-400'}`}>
+                                  {round.resultBigSmall === 'big' ? 'Big' : 'Small'}
+                                </span>
+                                <div className="w-[20%] flex justify-center gap-2">
+                                  {round.resultColor.map((c, i) => (
+                                    <div key={i} className={`w-3.5 h-3.5 rounded-full shadow-sm ${c === 'red' ? 'bg-[#ff4d4d]' : c === 'green' ? 'bg-[#38A169]' : 'bg-[#805AD5]'}`} />
+                                  ))}
+                                </div>
+                              </div>
+                              <AnimatePresence>
+                                {expandedRoundId === round.id && (
+                                  <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: 0.3 }}
+                                    className="overflow-hidden bg-gray-50/80 px-4"
+                                  >
+                                    <div className="py-4 space-y-3 border-t border-gray-100">
+                                      <h4 className="text-xs font-black text-gray-800 uppercase tracking-widest">Details</h4>
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div className="p-3 bg-white rounded-xl border border-gray-100">
+                                          <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">Period ID</p>
+                                          <p className="text-xs font-black text-gray-700">{round.id}</p>
+                                        </div>
+                                        <div className="p-3 bg-white rounded-xl border border-gray-100">
+                                          <p className="text-[10px] text-gray-400 font-bold uppercase mb-1">Result</p>
+                                          <p className="text-xs font-black text-gray-700 uppercase">{round.resultBigSmall} ({round.resultNumber})</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </TabsContent>
+                    <TabsContent value="chart" className="m-0 bg-white min-h-screen">
+                      <div className="px-4 py-20 flex flex-col items-center justify-center text-gray-200">
+                        <TrendingUp className="w-20 h-20 mb-4 opacity-20" />
+                        <p className="text-sm font-black uppercase tracking-widest text-gray-400">Analysis Coming Soon</p>
+                      </div>
+                    </TabsContent>
+                    <TabsContent value="myhistory" className="m-0 bg-white min-h-screen">
+                      <div className="divide-y divide-gray-50">
+                        {filteredMyBets.map((bet, index) => (
+                          <div key={`${bet.id}-${index}`} className="flex flex-col">
+                            <div 
+                              onClick={() => setExpandedBetId(expandedBetId === bet.id ? null : (bet.id || null))}
+                              className="px-6 py-6 flex flex-col gap-4 hover:bg-gray-50/50 transition-colors cursor-pointer"
+                            >
+                              <div className="flex justify-between items-center">
+                                <span className="text-[11px] font-black text-gray-400 uppercase tracking-widest">{bet.roundId}</span>
+                                <Badge className={`text-[10px] font-black px-4 py-1.5 rounded-full border-none shadow-sm ${bet.status === 'win' ? 'bg-green-100 text-green-600' : bet.status === 'loss' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                                  {bet.status === 'win' ? `WIN ₹${bet.payout?.toFixed(2)}` : bet.status === 'loss' ? 'LOSS' : 'WAITING'}
+                                </Badge>
+                              </div>
+                              <div className="flex justify-between items-end">
+                                <div className="flex flex-col gap-2">
+                                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Selected</span>
+                                  <span className={`text-base font-black uppercase italic tracking-wider ${
+                                    bet.selection === 'red' || bet.selection === 0 || bet.selection === 2 || bet.selection === 4 || bet.selection === 6 || bet.selection === 8 ? 'text-red-500' :
+                                    bet.selection === 'green' || bet.selection === 1 || bet.selection === 3 || bet.selection === 5 || bet.selection === 7 || bet.selection === 9 ? 'text-green-500' :
+                                    bet.selection === 'violet' ? 'text-purple-500' : 'text-gray-800'
+                                  }`}>{bet.selection}</span>
+                                </div>
+                                <div className="text-right flex flex-col gap-2">
+                                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Investment</span>
+                                  <span className="text-lg font-black text-gray-800">₹{bet.amount.toFixed(2)}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <AnimatePresence>
+                              {expandedBetId === bet.id && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: 'auto', opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.3 }}
+                                  className="overflow-hidden bg-gray-50/50 px-6"
+                                >
+                                  <div className="py-6 space-y-4 border-t border-gray-100">
+                                    <div className="flex justify-between items-center text-xs">
+                                      <span className="text-gray-400 font-bold uppercase tracking-widest">Transaction ID</span>
+                                      <span className="font-mono text-gray-600">{bet.id?.slice(0, 12)}...</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs">
+                                      <span className="text-gray-400 font-bold uppercase tracking-widest">Time</span>
+                                      <span className="text-gray-600">{new Date(bet.timestamp?.toDate()).toLocaleString()}</span>
+                                    </div>
+                                    <Button className="w-full h-10 bg-red-50 text-red-500 hover:bg-red-100 font-black rounded-xl text-[10px] uppercase tracking-widest">Order Details</Button>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        ))}
+                      </div>
+                    </TabsContent>
+                  </div>
+                </Tabs>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+      <Dialog open={betModalOpen} onOpenChange={setBetModalOpen}>
+        <DialogContent className="bg-white border-none text-gray-800 rounded-t-[2rem] sm:rounded-[2rem] p-0 overflow-hidden max-w-md shadow-2xl">
+          <div className="bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] p-6 text-center text-white">
+            <h3 className="text-xl font-black uppercase tracking-tight">Win Go {activeMode}</h3>
+            <p className="text-[10px] font-bold opacity-80 mt-1 uppercase tracking-widest">Select: {selectedBet}</p>
+          </div>
+          <div className="p-6 space-y-6">
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <span className="text-sm font-bold text-blue-200">Amount</span>
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Amount</span>
                 <div className="flex gap-2">
                   {['10', '100', '1000', '10000'].map((amt) => (
-                    <Button 
+                    <button 
                       key={amt} 
-                      variant="outline" 
-                      size="sm"
                       onClick={() => setBetAmount(amt)}
-                      className={`h-8 px-3 text-[11px] font-bold rounded-md transition-all ${betAmount === amt ? 'bg-blue-500 text-white border-none shadow-lg' : 'bg-blue-900/30 border-blue-800/50 text-blue-300'}`}
+                      className={`h-8 px-3 text-[10px] font-bold rounded-lg transition-all ${betAmount === amt ? 'bg-red-500 text-white shadow-md' : 'bg-gray-100 text-gray-400'}`}
                     >
                       {amt}
-                    </Button>
+                    </button>
                   ))}
                 </div>
               </div>
 
               <div className="flex justify-between items-center">
-                <span className="text-sm font-bold text-blue-200">Quantity</span>
-                <div className="flex items-center gap-3 bg-blue-900/30 rounded-lg p-1 border border-blue-800/50">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-300" onClick={() => setMultiplier(Math.max(1, multiplier - 1))}>-</Button>
-                  <span className="w-8 text-center font-black text-white">{multiplier}</span>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-300" onClick={() => setMultiplier(multiplier + 1)}>+</Button>
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Quantity</span>
+                <div className="flex items-center gap-4 bg-gray-50 rounded-xl p-1 border border-gray-100">
+                  <button className="w-8 h-8 flex items-center justify-center text-gray-400 font-bold" onClick={() => setMultiplier(Math.max(1, multiplier - 1))}>-</button>
+                  <span className="w-8 text-center font-black text-gray-800">{multiplier}</span>
+                  <button className="w-8 h-8 flex items-center justify-center text-gray-400 font-bold" onClick={() => setMultiplier(multiplier + 1)}>+</button>
                 </div>
               </div>
 
               <div className="flex flex-wrap gap-2 justify-end">
                 {[1, 5, 10, 20, 50, 100].map((m) => (
-                  <Button 
+                  <button 
                     key={m} 
-                    variant="outline" 
-                    size="sm"
                     onClick={() => setMultiplier(m)}
-                    className={`h-7 px-3 text-[10px] font-bold rounded-md transition-all ${multiplier === m ? 'bg-blue-500 text-white border-none shadow-md' : 'bg-blue-900/30 border-blue-800/50 text-blue-300'}`}
+                    className={`h-7 px-3 text-[9px] font-bold rounded-md transition-all ${multiplier === m ? 'bg-red-500 text-white shadow-sm' : 'bg-gray-100 text-gray-400'}`}
                   >
                     X{m}
-                  </Button>
+                  </button>
                 ))}
               </div>
             </div>
 
-            <div className="bg-[#1a1f4d] rounded-2xl p-4 flex justify-between items-center border border-blue-900/50">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-xs font-bold text-blue-300">Total Amount</span>
-              </div>
-              <span className="text-xl font-black text-white">₹{(parseFloat(betAmount || '0') * multiplier).toFixed(2)}</span>
+            <div className="bg-gray-50 rounded-2xl p-4 flex justify-between items-center border border-gray-100">
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Total Amount</span>
+              <span className="text-xl font-black text-red-500">₹{(parseFloat(betAmount || '0') * multiplier).toFixed(2)}</span>
             </div>
 
             <div className="flex gap-4">
-              <Button variant="ghost" onClick={() => setBetModalOpen(false)} className="flex-1 h-12 text-blue-300 font-bold hover:bg-blue-900/30 rounded-xl">Cancel</Button>
-              <Button onClick={placeBet} className="flex-[2] h-12 bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-black text-lg rounded-xl shadow-xl shadow-blue-900/40">Total ₹{(parseFloat(betAmount || '0') * multiplier).toFixed(2)}</Button>
+              <Button variant="ghost" onClick={() => setBetModalOpen(false)} className="flex-1 h-12 text-gray-400 font-bold hover:bg-gray-50 rounded-xl">Cancel</Button>
+              <Button onClick={placeBet} className="flex-[2] h-12 bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] hover:opacity-90 text-white font-black text-sm rounded-xl shadow-lg shadow-red-100">Confirm Bet</Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
+
       {/* Result Popup */}
-      <Dialog open={showResultPopup} onOpenChange={setShowResultPopup}>
-        <DialogContent className="bg-transparent border-none shadow-none p-0 max-w-[320px] sm:max-w-sm flex flex-col items-center justify-center">
-          {lastResult && (
-            <motion.div 
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className={`w-full rounded-[40px] p-6 text-center relative overflow-hidden ${lastResult.status === 'win' ? 'bg-gradient-to-b from-[#4facfe] to-[#00f2fe]' : 'bg-gradient-to-b from-[#485563] to-[#29323c]'}`}
-            >
-              {/* Header */}
-              <div className="space-y-2 mb-4">
-                <h2 className="text-4xl font-black text-white italic tracking-wider">
-                  {lastResult.status === 'win' ? 'Winning' : 'Try Again'}
-                </h2>
-                {lastResult.status === 'win' && (
-                  <div className="flex justify-center">
-                    <Trophy className="w-12 h-12 text-yellow-400 drop-shadow-lg" />
-                  </div>
-                )}
-                {lastResult.status === 'loss' && (
-                  <div className="text-4xl">🥺</div>
-                )}
-              </div>
-
-              {/* Result Details */}
-              <div className="flex flex-col items-center gap-4 mb-6">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-white/80">Lottery Result:</span>
-                  <div className="flex gap-2">
-                    {lastResult.color.map(c => (
-                      <Badge key={c} className={`capitalize border-none ${c === 'red' ? 'bg-red-500' : c === 'green' ? 'bg-green-500' : 'bg-purple-500'}`}>
-                        {c}
-                      </Badge>
-                    ))}
-                    <Badge className="bg-green-500 border-none">{lastResult.number}</Badge>
-                  </div>
-                </div>
-                <Badge className="bg-green-500 border-none px-6 py-1 text-sm capitalize">{lastResult.bigSmall}</Badge>
-              </div>
-
-              {/* Receipt Style Card */}
-              <div className="relative">
-                <div className="bg-white rounded-t-xl p-4 pt-8 pb-10 shadow-inner">
-                  <div className={`text-4xl font-black mb-2 ${lastResult.status === 'win' ? 'text-orange-500' : 'text-red-500'}`}>
-                    {lastResult.status === 'win' ? 'WIN' : 'LOSS'} : {lastResult.amount.toFixed(0)}
-                  </div>
-                  <p className="text-[10px] text-orange-900/60 font-bold">
-                    Period : {activeMode} {lastResult.roundId}
-                  </p>
-                </div>
-                {/* Perforated edge effect */}
-                <div className="absolute -bottom-2 left-0 right-0 h-4 bg-white rounded-b-xl flex justify-around items-end overflow-hidden">
-                  {Array.from({ length: 15 }).map((_, i) => (
-                    <div key={i} className="w-4 h-4 bg-[#1a1a2e] rounded-full -mb-2" />
-                  ))}
-                </div>
-              </div>
-
-              {/* Close Button */}
-              <button 
-                onClick={() => setShowResultPopup(false)}
-                className="mt-12 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-white border border-white/30 hover:bg-white/30 transition-colors"
+      <AnimatePresence>
+        {showResultPopup && lastResult && (
+          <Dialog open={showResultPopup} onOpenChange={setShowResultPopup}>
+            <DialogContent className="bg-transparent border-none shadow-none p-0 max-w-[320px] flex flex-col items-center justify-center">
+              <motion.div 
+                initial={{ scale: 0.5, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.5, opacity: 0 }}
+                className="w-full relative"
               >
-                <X className="w-6 h-6" />
-              </button>
-            </motion.div>
-          )}
-        </DialogContent>
-      </Dialog>
+                <div className={`rounded-[2.5rem] p-8 text-center shadow-2xl ${lastResult.status === 'win' ? 'bg-gradient-to-b from-[#ff7e7e] to-[#ff4d4d]' : 'bg-gray-800'}`}>
+                  <h2 className="text-3xl font-black text-white italic mb-4">
+                    {lastResult.status === 'win' ? 'CONGRATULATIONS' : 'TRY AGAIN'}
+                  </h2>
+                  
+                  <div className="bg-white/10 rounded-2xl p-6 mb-6 backdrop-blur-sm border border-white/10">
+                    <p className="text-[10px] font-bold text-white/60 uppercase tracking-widest mb-2">Lottery Result</p>
+                    <div className="flex justify-center gap-3 items-center">
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl font-black text-white shadow-lg ${
+                        lastResult.number === 0 ? 'bg-gradient-to-br from-red-500 to-purple-500' :
+                        lastResult.number === 5 ? 'bg-gradient-to-br from-green-500 to-purple-500' :
+                        lastResult.number % 2 === 0 ? 'bg-red-500' : 'bg-green-500'
+                      }`}>
+                        {lastResult.number}
+                      </div>
+                      <div className="flex flex-col items-start">
+                        <span className="text-xs font-black text-white uppercase tracking-widest">{lastResult.bigSmall}</span>
+                        <div className="flex gap-1">
+                          {lastResult.color.map(c => (
+                            <div key={c} className={`w-2 h-2 rounded-full ${c === 'red' ? 'bg-red-500' : c === 'green' ? 'bg-green-500' : 'bg-purple-500'}`} />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl p-6 shadow-inner">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
+                      {lastResult.status === 'win' ? 'Bonus' : 'Loss Amount'}
+                    </p>
+                    <p className={`text-3xl font-black ${lastResult.status === 'win' ? 'text-red-500' : 'text-gray-400'}`}>
+                      ₹{lastResult.amount.toFixed(2)}
+                    </p>
+                    <p className="text-[8px] font-mono text-gray-300 mt-2">Period: {lastResult.roundId}</p>
+                  </div>
+
+                  <button 
+                    onClick={() => setShowResultPopup(false)}
+                    className="mt-8 w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-white border border-white/20 hover:bg-white/30 transition-colors mx-auto"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </motion.div>
+            </DialogContent>
+          </Dialog>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

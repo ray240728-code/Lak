@@ -4,6 +4,7 @@ export type BigSmall = 'big' | 'small';
 
 export interface Bet {
   id: string;
+  userId: string;
   roundId: string;
   mode: GameMode;
   amount: number;
@@ -24,7 +25,7 @@ export interface GameRound {
   status: 'active' | 'completed';
 }
 
-export type GameMode = '30sec' | '1min' | '3min' | '5min';
+export type GameMode = '1min' | '3min' | '5min' | '10min';
 
 export interface GiftCard {
   id: string;

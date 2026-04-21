@@ -32,7 +32,7 @@ export default function Login({ onNavigate, onLogin, onGoogleLogin, loading }: L
   };
 
   return (
-    <div className="min-h-screen bg-[#2b3270] flex flex-col">
+    <div className="min-h-screen bg-gradient-to-b from-[#ff4d4d] to-[#cc0000] flex flex-col">
       {/* Header */}
       <div className="p-4 flex items-center justify-between text-white">
         <div className="w-10" /> {/* Spacer instead of close button */}
@@ -44,14 +44,14 @@ export default function Login({ onNavigate, onLogin, onGoogleLogin, loading }: L
       </div>
 
       {/* Banner Text */}
-      <div className="px-6 py-4 bg-gradient-to-b from-[#2b3270] to-[#1a1a2e]">
-        <p className="text-xs text-blue-200 opacity-80">Please log in with your phone number or email</p>
-        <p className="text-xs text-blue-200 opacity-80">If you forget your password, please contact customer service</p>
+      <div className="px-6 py-4 bg-black/10">
+        <p className="text-xs text-red-100 opacity-80">Please log in with your phone number or email</p>
+        <p className="text-xs text-red-100 opacity-80">If you forget your password, please contact customer service</p>
       </div>
 
       {/* Login Type Toggle */}
-      <div className="flex bg-[#3a448c]">
-        <button className="flex-1 py-3 flex flex-col items-center gap-1 border-b-2 border-blue-400 text-blue-400">
+      <div className="flex bg-black/20">
+        <button className="flex-1 py-3 flex flex-col items-center gap-1 border-b-2 border-white text-white">
           <Phone className="w-5 h-5" />
           <span className="text-xs font-bold">Log in with phone</span>
         </button>
@@ -61,37 +61,38 @@ export default function Login({ onNavigate, onLogin, onGoogleLogin, loading }: L
       <div className="flex-1 p-6 space-y-6">
         <div className="space-y-4">
           <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm font-medium text-blue-100">
-              <Phone className="w-4 h-4 text-blue-400" /> Phone number
+            <label className="flex items-center gap-2 text-sm font-medium text-red-50">
+              <Phone className="w-4 h-4 text-red-200" /> Phone number
             </label>
             <div className="flex gap-2">
-              <div className="flex items-center gap-1 px-3 bg-[#3a448c] rounded-md border border-blue-900/50 text-white">
+              <div className="flex items-center gap-1 px-3 bg-white/10 rounded-md border border-white/20 text-white">
                 <span className="text-sm">+91</span>
-                <span className="text-[10px] text-blue-300">▼</span>
+                <span className="text-[10px] text-red-200">▼</span>
               </div>
               <Input 
-                placeholder="Please enter the phone nur" 
-                className="bg-[#3a448c] border-blue-900/50 text-white placeholder:text-blue-300/50"
+                type="tel"
+                placeholder="Please enter your phone number" 
+                className="bg-white/10 border-white/20 text-white placeholder:text-red-100/50"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
               />
             </div>
           </div>
 
           <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm font-medium text-blue-100">
-              <Lock className="w-4 h-4 text-blue-400" /> Password
+            <label className="flex items-center gap-2 text-sm font-medium text-red-50">
+              <Lock className="w-4 h-4 text-red-200" /> Password
             </label>
             <div className="relative">
               <Input 
                 type={showPassword ? 'text' : 'password'}
-                placeholder="Please enterPassword" 
-                className="bg-[#3a448c] border-blue-900/50 text-white pr-10 placeholder:text-blue-300/50"
+                placeholder="Please enter your password" 
+                className="bg-white/10 border-white/20 text-white pr-10 placeholder:text-red-100/50"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
               <button 
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-300"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-red-200"
                 onClick={() => setShowPassword(!showPassword)}
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -100,26 +101,26 @@ export default function Login({ onNavigate, onLogin, onGoogleLogin, loading }: L
           </div>
 
           <div className="flex items-center gap-2">
-            <Checkbox id="remember" className="border-blue-400 data-[state=checked]:bg-blue-400" />
-            <label htmlFor="remember" className="text-xs text-blue-200">Remember password</label>
+            <Checkbox id="remember" className="border-white/50 data-[state=checked]:bg-white data-[state=checked]:text-red-600" />
+            <label htmlFor="remember" className="text-xs text-red-100">Remember password</label>
           </div>
         </div>
 
         <div className="space-y-4">
           <Button 
-            className="w-full h-12 bg-blue-400 hover:bg-blue-500 text-white font-bold text-lg rounded-full"
+            className="w-full h-12 bg-white text-red-600 hover:bg-gray-100 font-bold text-lg rounded-full shadow-lg"
             onClick={handleLogin}
             disabled={loading}
           >
             {loading ? (
-              <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
             ) : (
               'Log in'
             )}
           </Button>
           <Button 
             variant="outline" 
-            className="w-full h-12 border-blue-400 text-blue-400 hover:bg-blue-400/10 font-bold text-lg rounded-full"
+            className="w-full h-12 border-white text-white hover:bg-white/10 font-bold text-lg rounded-full"
             onClick={() => onNavigate('register')}
           >
             Register
@@ -127,16 +128,16 @@ export default function Login({ onNavigate, onLogin, onGoogleLogin, loading }: L
 
           <div className="relative py-4">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-blue-900/50"></div>
+              <div className="w-full border-t border-white/20"></div>
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-[#2b3270] px-2 text-blue-300">Or continue with</span>
+              <span className="bg-red-600 px-2 text-red-100">Or continue with</span>
             </div>
           </div>
 
           <Button 
             variant="outline" 
-            className="w-full h-12 border-blue-400 text-blue-400 hover:bg-blue-400/10 font-bold rounded-full flex items-center justify-center gap-2"
+            className="w-full h-12 border-white text-white hover:bg-white/10 font-bold rounded-full flex items-center justify-center gap-2"
             onClick={onGoogleLogin}
             disabled={loading}
           >
@@ -147,18 +148,18 @@ export default function Login({ onNavigate, onLogin, onGoogleLogin, loading }: L
 
         <div className="flex justify-around pt-10">
           <button 
-            className="flex flex-col items-center gap-2 text-blue-300"
+            className="flex flex-col items-center gap-2 text-red-100"
             onClick={() => toast.info('Please contact support to reset your password.', {
               description: 'Admin can also reset your password from the Admin Panel.'
             })}
           >
-            <div className="w-10 h-10 rounded-full bg-[#3a448c] flex items-center justify-center">
+            <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
               <Lock className="w-5 h-5" />
             </div>
             <span className="text-xs">Forgot password</span>
           </button>
-          <button className="flex flex-col items-center gap-2 text-blue-300">
-            <div className="w-10 h-10 rounded-full bg-[#3a448c] flex items-center justify-center">
+          <button className="flex flex-col items-center gap-2 text-red-100">
+            <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
               <Headphones className="w-5 h-5" />
             </div>
             <span className="text-xs">Customer Service</span>
@@ -166,7 +167,7 @@ export default function Login({ onNavigate, onLogin, onGoogleLogin, loading }: L
         </div>
 
         <div className="pt-8 pb-4 text-center">
-          <p className="text-[10px] font-bold tracking-widest text-blue-300/40 uppercase">
+          <p className="text-[10px] font-bold tracking-widest text-red-200/40 uppercase">
             Fair Play Partner by ADX
           </p>
         </div>

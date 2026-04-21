@@ -25,15 +25,19 @@ type Page = 'login' | 'register' | 'home' | 'activity' | 'wallet' | 'promotion' 
 
 import { User } from './types';
 
-import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { auth, db, handleFirestoreError, OperationType, testConnection } from './firebase';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, increment, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, increment, collection, query, where, getDocs, serverTimestamp, onSnapshot } from 'firebase/firestore';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('login');
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const isAuthActionInProgress = useRef(false);
+
+  useEffect(() => {
+    testConnection();
+  }, []);
 
   const handleGoogleLogin = async () => {
     isAuthActionInProgress.current = true;
@@ -70,7 +74,13 @@ export default function App() {
         }
         setUser(newUser);
       } else {
-        setUser(userDoc.data() as User);
+        let userData = userDoc.data() as User;
+        // Force admin role check even for existing users
+        if (firebaseUser.email === 'purnundurayr@gmail.com' && userData.role !== 'admin') {
+          await updateDoc(doc(db, 'users', firebaseUser.uid), { role: 'admin' });
+          userData.role = 'admin';
+        }
+        setUser(userData);
       }
       toast.success('Login successful!');
       setCurrentPage('home');
@@ -83,6 +93,10 @@ export default function App() {
       } else if (error.code === 'auth/cancelled-popup-request') {
         // This happens if multiple popups are opened
         console.log("Popup request cancelled");
+      } else if (error.code === 'auth/unauthorized-domain') {
+        toast.error('Domain not authorized', {
+          description: 'Please add your current domain to the Authorized Domains in your Firebase Console (Authentication > Settings).'
+        });
       } else {
         toast.error('Google login failed. Please try again.', {
           description: error.message || 'If the issue persists, try opening the app in a new tab.'
@@ -95,34 +109,56 @@ export default function App() {
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (isAuthActionInProgress.current) return;
-      
+    let unsubscribeUser: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      // Clean up previous user listener if it exists
+      if (unsubscribeUser) {
+        unsubscribeUser();
+        unsubscribeUser = null;
+      }
+
       if (firebaseUser) {
-        try {
-          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-          if (userDoc.exists()) {
-            setUser(userDoc.data() as User);
-            setCurrentPage('home');
+        const userRef = doc(db, 'users', firebaseUser.uid);
+        unsubscribeUser = onSnapshot(userRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const userData = docSnap.data() as User;
+            setUser(userData);
+            
+            // Auto-navigate from login/register if user is found, but only if we're not manually handling it
+            if (!isAuthActionInProgress.current && (currentPage === 'login' || currentPage === 'register')) {
+              setCurrentPage('home');
+            }
           } else {
-            // Handle case where auth exists but firestore doc doesn't
+            // Document doesn't exist yet
+            if (!isAuthActionInProgress.current) {
+              setUser(null);
+              setCurrentPage('login');
+            }
+          }
+          setLoading(false);
+        }, (err) => {
+          console.error("User listener error:", err);
+          if (!isAuthActionInProgress.current) {
             setUser(null);
             setCurrentPage('login');
           }
-        } catch (err) {
-          console.error("Auth state change error:", err);
-          setUser(null);
-          setCurrentPage('login');
-        }
+          setLoading(false);
+        });
       } else {
         setUser(null);
-        setCurrentPage('login');
+        if (!isAuthActionInProgress.current) {
+          setCurrentPage('login');
+        }
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribe();
-  }, []);
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeUser) unsubscribeUser();
+    };
+  }, [currentPage]); // Re-run if currentPage changes to handle auto-navigation correctly
 
   const navigate = (page: any) => setCurrentPage(page);
 
@@ -176,7 +212,16 @@ export default function App() {
       }
 
       if (userDoc?.exists()) {
-        const userData = userDoc.data() as User;
+        let userData = userDoc.data() as User;
+        
+        // Force admin role for the specific admin user
+        if (userData.phone === '9999999999' || userCredential.user.email === 'purnundurayr@gmail.com') {
+          if (userData.role !== 'admin') {
+            await updateDoc(doc(db, 'users', uid), { role: 'admin' });
+            userData.role = 'admin';
+          }
+        }
+        
         if (userData.status === 'blocked') {
           await signOut(auth);
           toast.error('Your account has been blocked. Contact support.');
@@ -355,14 +400,14 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#1a1a2e] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#1a1a2e] text-white font-sans overflow-x-hidden">
+    <div className="min-h-screen bg-[#f8f3f3] text-gray-900 font-sans overflow-x-hidden">
       <Toaster position="top-center" richColors />
       
       <AnimatePresence mode="wait">
@@ -379,18 +424,18 @@ export default function App() {
           
           {user && (
             <>
-              {currentPage === 'home' && <Home onNavigate={navigate} />}
-              {currentPage === 'activity' && <Activity onNavigate={navigate} />}
+              {currentPage === 'home' && <Home onNavigate={navigate} user={user} />}
+              {currentPage === 'activity' && <Activity onNavigate={navigate} user={user} />}
               {currentPage === 'wallet' && <Wallet onNavigate={navigate} user={user} />}
               {currentPage === 'promotion' && <Promotion onNavigate={navigate} user={user} />}
               {currentPage === 'profile' && <Profile onNavigate={navigate} onLogout={handleLogout} user={user} onClearCache={clearCache} />}
               {currentPage === 'wingo' && <WinGo onNavigate={navigate} user={user} />}
-              {currentPage === 'admin' && <AdminPanel onNavigate={navigate} />}
+              {currentPage === 'admin' && <AdminPanel onNavigate={navigate} user={user} />}
               {currentPage === 'security' && <StaticPage title="Security & Safety" type="security" onBack={() => navigate('profile')} />}
               {currentPage === 'guide' && <StaticPage title="Guide for Beginners" type="guide" onBack={() => navigate('profile')} />}
               {currentPage === 'about' && <StaticPage title="About Us" type="about" onBack={() => navigate('profile')} />}
               {currentPage === 'salary' && <StaticPage title="Salary Record" type="salary" onBack={() => navigate('profile')} />}
-              {currentPage === 'game-stats' && <GameStats onBack={() => navigate('profile')} />}
+              {currentPage === 'game-stats' && <GameStats onBack={() => navigate('profile')} user={user!} />}
               {currentPage === 'history-bet' && <HistoryPage title="Bet History" type="bet" onBack={() => navigate('profile')} user={user} />}
               {currentPage === 'history-transaction' && <HistoryPage title="Transaction History" type="transaction" onBack={() => navigate('profile')} user={user} />}
               {currentPage === 'history-deposit' && <HistoryPage title="Deposit History" type="deposit" onBack={() => navigate('profile')} user={user} />}

@@ -1,11 +1,25 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+export async function testConnection() {
+  try {
+    // Try to fetch a non-existent document just to test connectivity
+    await getDocFromServer(doc(db, '_test_connection_', 'ping'));
+    console.log('Firestore connection successful');
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Firestore connection failed: The client is offline. Please check your Firebase configuration and ensure the database is provisioned.");
+    } else {
+      console.error("Firestore connection test error:", error);
+    }
+  }
+}
 
 export enum OperationType {
   CREATE = 'create',

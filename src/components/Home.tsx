@@ -1,25 +1,50 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Bell, ChevronRight, MessageSquare, Timer, Wallet, Trophy, TrendingUp, ShieldCheck, Gamepad2, Star, Users, Gift, Headphones, ChevronLeft, X } from 'lucide-react';
+import { 
+  Bell, 
+  ChevronRight, 
+  MessageSquare, 
+  Timer, 
+  Wallet, 
+  Trophy, 
+  TrendingUp, 
+  ShieldCheck, 
+  Gamepad2, 
+  Star, 
+  Users, 
+  Gift, 
+  Headphones, 
+  ChevronLeft, 
+  X,
+  Volume2,
+  LayoutGrid,
+  Zap,
+  Flame,
+  Dices,
+  Fish,
+  Gamepad,
+  User as UserIcon
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Layout from './Layout';
+import { db } from '../firebase';
+import { collection, onSnapshot, query, orderBy, doc, getDoc, where, limit } from 'firebase/firestore';
 
 interface HomeProps {
   onNavigate: (page: any) => void;
+  user: any;
 }
 
-import { db } from '../firebase';
-import { collection, onSnapshot, query, orderBy, doc, getDoc } from 'firebase/firestore';
-
-export default function Home({ onNavigate }: HomeProps) {
+export default function Home({ onNavigate, user }: HomeProps) {
   const [banners, setBanners] = useState<string[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [showPopup, setShowPopup] = useState(false);
   const [popupBanner, setPopupBanner] = useState<string | null>(null);
+  const [currentBanner, setCurrentBanner] = useState(0);
+  const [realWins, setRealWins] = useState<any[]>([]);
 
   useEffect(() => {
-    // Load banners from Firestore
     const bannersRef = collection(db, 'banners');
     const qBanners = query(bannersRef, orderBy('order', 'asc'));
     const unsubscribeBanners = onSnapshot(qBanners, (snapshot) => {
@@ -34,22 +59,15 @@ export default function Home({ onNavigate }: HomeProps) {
       }
     });
 
-    // Load activities from Firestore
     const activitiesRef = collection(db, 'activities');
     const qActivities = query(activitiesRef, orderBy('createdAt', 'desc'));
     const unsubscribeActivities = onSnapshot(qActivities, (snapshot) => {
       const activityData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       if (activityData.length > 0) {
         setActivities(activityData);
-      } else {
-        setActivities([
-          { id: '1', title: 'Welcome Bonus', imageUrl: 'https://picsum.photos/seed/bonus/400/200' },
-          { id: '2', title: 'Daily Rewards', imageUrl: 'https://picsum.photos/seed/daily/400/200' }
-        ]);
       }
     });
 
-    // Load pop-up banner from Firestore config
     const configRef = doc(db, 'config', 'settings');
     const unsubscribeConfig = onSnapshot(configRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -61,14 +79,38 @@ export default function Home({ onNavigate }: HomeProps) {
       }
     });
 
+    // Real-time Winning List
+    const betsRef = collection(db, 'bets');
+    const qWins = query(betsRef, where('status', '==', 'win'), orderBy('timestamp', 'desc'), limit(10));
+    const unsubscribeWins = onSnapshot(qWins, async (snapshot) => {
+      const wins = await Promise.all(snapshot.docs.map(async (betDoc) => {
+        const data = betDoc.data();
+        let userName = 'Mem***' + data.userId.slice(-2);
+        try {
+          const userSnap = await getDoc(doc(db, 'users', data.userId));
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            userName = (userData.name || 'Member').slice(0, 3) + '***' + (userData.phone || '').slice(-2);
+          }
+        } catch (e) { /* ignore */ }
+        
+        return {
+          id: betDoc.id,
+          user: userName,
+          amount: `₹${(data.payout || 0).toFixed(2)}`,
+          game: data.mode === '1min' ? 'Win Go' : `Win Go ${data.mode}`
+        };
+      }));
+      setRealWins(wins);
+    });
+
     return () => {
       unsubscribeBanners();
       unsubscribeActivities();
       unsubscribeConfig();
+      unsubscribeWins();
     };
   }, []);
-
-  const [currentBanner, setCurrentBanner] = useState(0);
 
   useEffect(() => {
     if (banners.length === 0) return;
@@ -80,7 +122,6 @@ export default function Home({ onNavigate }: HomeProps) {
 
   return (
     <Layout onNavigate={onNavigate} activeTab="home">
-      {/* Pop-up Banner Modal */}
       <AnimatePresence>
         {showPopup && popupBanner && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm">
@@ -88,11 +129,11 @@ export default function Home({ onNavigate }: HomeProps) {
               initial={{ scale: 0.5, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.5, opacity: 0 }}
-              className="relative max-w-sm w-full bg-[#2b3270] rounded-3xl overflow-hidden shadow-2xl border border-blue-500/30"
+              className="relative max-w-sm w-full bg-white rounded-[2.5rem] overflow-hidden shadow-2xl"
             >
               <button 
                 onClick={() => setShowPopup(false)}
-                className="absolute top-4 right-4 z-10 w-8 h-8 bg-black/50 rounded-full flex items-center justify-center text-white hover:bg-black/70 transition-colors"
+                className="absolute top-4 right-4 z-10 w-8 h-8 bg-black/20 rounded-full flex items-center justify-center text-white hover:bg-black/40 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -102,9 +143,9 @@ export default function Home({ onNavigate }: HomeProps) {
                 className="w-full aspect-[4/5] object-cover"
                 referrerPolicy="no-referrer"
               />
-              <div className="p-6 text-center">
+              <div className="p-6">
                 <Button 
-                  className="w-full h-12 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full shadow-lg shadow-blue-900/40"
+                  className="w-full h-12 bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] hover:opacity-90 text-white font-black rounded-xl shadow-lg shadow-red-100"
                   onClick={() => setShowPopup(false)}
                 >
                   CLOSE
@@ -114,195 +155,178 @@ export default function Home({ onNavigate }: HomeProps) {
           </div>
         )}
       </AnimatePresence>
+
       <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="flex flex-col min-h-screen pb-20"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="flex flex-col min-h-screen pb-24 bg-[#f8f3f3]"
       >
         {/* Header */}
-        <div className="p-4 flex items-center justify-between">
-          <h1 className="text-2xl font-serif italic tracking-widest text-[#f8d08c]">LAKSHMI CLUB</h1>
-          <Button variant="ghost" size="icon" className="text-blue-300">
-            <Bell className="w-6 h-6" />
-          </Button>
+        <div className="p-4 flex items-center justify-between bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] text-white sticky top-0 z-50 shadow-md">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
+              <Zap className="w-5 h-5 text-white" />
+            </div>
+            <h1 className="text-xl font-black tracking-tighter italic">LAKSHMI CLUB</h1>
+          </div>
+          <div className="flex gap-1">
+            <button className="p-2 hover:bg-white/10 rounded-full transition-colors relative">
+              <Bell className="w-5 h-5" />
+              <span className="absolute top-2 right-2 w-2 h-2 bg-yellow-400 rounded-full border-2 border-[#ff4d4d]" />
+            </button>
+            <button className="p-2 hover:bg-white/10 rounded-full transition-colors">
+              <Headphones className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Banner Slider */}
-        <div className="px-4 mb-4">
-          <div className="w-full h-44 bg-[#2b3270] rounded-xl overflow-hidden relative border border-blue-700/50">
+        <div className="px-4 mt-4">
+          <div className="w-full h-44 rounded-2xl overflow-hidden relative shadow-lg group">
             <AnimatePresence mode="wait">
               <motion.img
                 key={currentBanner}
                 src={banners[currentBanner]}
-                initial={{ opacity: 0, x: 100 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -100 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
                 transition={{ duration: 0.5 }}
                 className="absolute inset-0 w-full h-full object-cover"
                 referrerPolicy="no-referrer"
               />
             </AnimatePresence>
-            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
               {banners.map((_, i) => (
                 <div 
                   key={i} 
-                  className={`w-1.5 h-1.5 rounded-full transition-colors ${i === currentBanner ? 'bg-blue-400' : 'bg-white/30'}`} 
+                  className={`h-1 rounded-full transition-all duration-300 ${i === currentBanner ? 'w-6 bg-white' : 'w-2 bg-white/40'}`} 
                 />
               ))}
             </div>
           </div>
         </div>
 
-        {/* Notification */}
-        <div className="px-4 mb-6">
-          <div className="flex items-center gap-2 bg-[#2b3270] p-3 rounded-full border border-blue-900/50">
-            <Bell className="w-4 h-4 text-orange-400" />
+        {/* Announcement */}
+        <div className="px-4 mt-4">
+          <div className="bg-white rounded-full px-4 py-2 flex items-center gap-3 text-gray-500 shadow-sm overflow-hidden border border-gray-50">
+            <Volume2 className="w-4 h-4 flex-shrink-0 text-red-400" />
             <div className="flex-1 overflow-hidden">
               <motion.p 
-                animate={{ x: [300, -300] }}
-                transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                className="text-[10px] text-blue-100 whitespace-nowrap"
+                animate={{ x: [400, -400] }}
+                transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+                className="text-[10px] whitespace-nowrap font-bold uppercase tracking-wider"
               >
                 Welcome to LAKSHMI CLUB! Most popular game site in India. Stable, Safe & Fast.
               </motion.p>
             </div>
-            <MessageSquare className="w-4 h-4 text-blue-400" />
           </div>
         </div>
 
-        {/* Popular Lottery Section */}
-        <div className="px-4 mb-6 space-y-4">
-          <h3 className="text-lg font-bold text-white pl-2 border-l-4 border-blue-400">Popular Lottery</h3>
-          <div className="grid grid-cols-2 gap-4">
-            {/* Left large card */}
-            <div className="space-y-4">
-              <motion.div 
-                whileTap={{ scale: 0.98 }}
-                className="h-32 bg-gradient-to-br from-blue-400 to-blue-600 rounded-2xl p-3 relative overflow-hidden shadow-lg cursor-pointer"
-                onClick={() => onNavigate('wingo')}
-              >
-                <div className="relative z-10 space-y-1">
-                  <h4 className="text-sm font-bold text-white">Trx 1Min</h4>
-                  <p className="text-[10px] text-blue-100 opacity-80">Countdown to lottery</p>
-                  <div className="flex gap-1 mt-2">
-                    <div className="bg-white/20 px-1.5 py-0.5 rounded text-[10px] font-mono text-white">00</div>
-                    <div className="text-white">:</div>
-                    <div className="bg-white/20 px-1.5 py-0.5 rounded text-[10px] font-mono text-white">60</div>
-                  </div>
-                </div>
-                <div className="absolute -right-2 -bottom-2 opacity-30">
-                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
-                    <Timer className="w-10 h-10 text-blue-600" />
-                  </div>
-                </div>
-              </motion.div>
+        {/* Game Categories */}
+        <div className="px-4 mt-6 grid grid-cols-4 gap-4">
+          {[
+            { label: 'Lottery', icon: Flame, color: 'bg-red-50 text-red-500' },
+            { label: 'Slots', icon: LayoutGrid, color: 'bg-orange-50 text-orange-500' },
+            { label: 'Fishing', icon: Fish, color: 'bg-blue-50 text-blue-500' },
+            { label: 'Casino', icon: Dices, color: 'bg-green-50 text-green-500' },
+          ].map((cat, i) => (
+            <button key={i} className="flex flex-col items-center gap-2">
+              <div className={`w-14 h-14 rounded-2xl ${cat.color} flex items-center justify-center shadow-sm`}>
+                <cat.icon className="w-7 h-7" />
+              </div>
+              <span className="text-[10px] font-bold text-gray-600">{cat.label}</span>
+            </button>
+          ))}
+        </div>
 
-              <motion.div 
-                whileTap={{ scale: 0.98 }}
-                className="h-32 bg-gradient-to-br from-orange-400 to-red-500 rounded-2xl p-3 relative overflow-hidden shadow-lg cursor-pointer"
-                onClick={() => onNavigate('wingo')}
-              >
-                <div className="relative z-10 space-y-1">
-                  <h4 className="text-sm font-bold text-white">5D 1Min</h4>
-                  <p className="text-[10px] text-white/80">Countdown to lottery</p>
-                  <div className="flex gap-1 mt-2">
-                    <div className="bg-white/20 px-1.5 py-0.5 rounded text-[10px] font-mono text-white">00</div>
-                    <div className="text-white">:</div>
-                    <div className="bg-white/20 px-1.5 py-0.5 rounded text-[10px] font-mono text-white">60</div>
-                  </div>
-                </div>
-                <div className="absolute -right-2 -bottom-2 opacity-30">
-                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
-                    <Timer className="w-10 h-10 text-red-600" />
-                  </div>
-                </div>
-              </motion.div>
+        {/* Featured Games */}
+        <div className="px-4 mt-8 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-1 h-4 bg-red-500 rounded-full" />
+              <h3 className="text-sm font-black text-gray-800 uppercase tracking-widest">Popular Games</h3>
             </div>
+            <button className="text-[10px] font-bold text-red-500 uppercase tracking-widest">View All</button>
+          </div>
 
-            {/* Right tall card */}
+          <div className="grid grid-cols-2 gap-4">
             <motion.div 
               whileTap={{ scale: 0.98 }}
-              className="h-full bg-gradient-to-br from-purple-500 to-pink-600 rounded-2xl p-4 relative overflow-hidden shadow-lg cursor-pointer flex flex-col justify-between"
+              className="aspect-[4/5] bg-gradient-to-br from-red-500 to-red-600 rounded-3xl p-5 relative overflow-hidden shadow-lg group cursor-pointer"
               onClick={() => onNavigate('wingo')}
             >
-              <div className="relative z-10 space-y-1">
-                <h4 className="text-sm font-bold text-white">WinGo 1Min</h4>
-                <p className="text-[10px] text-white/80">Countdown to lottery</p>
-                <div className="flex gap-1 mt-2">
-                  <div className="bg-white/20 px-1.5 py-0.5 rounded text-[10px] font-mono text-white">00</div>
-                  <div className="text-white">:</div>
-                  <div className="bg-white/20 px-1.5 py-0.5 rounded text-[10px] font-mono text-white">60</div>
+              <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/10 blur-2xl rounded-full" />
+              <div className="relative z-10 h-full flex flex-col justify-between">
+                <div>
+                  <h4 className="text-xl font-black text-white italic leading-tight">WIN GO<br/>1MIN</h4>
+                  <p className="text-[9px] text-white/60 font-bold uppercase tracking-widest mt-1">Lottery Game</p>
                 </div>
-              </div>
-              <div className="relative z-10 flex flex-col items-center gap-2">
-                <div className="w-20 h-20 bg-white/10 rounded-full flex items-center justify-center border-2 border-white/20">
-                  <Timer className="w-12 h-12 text-white" />
-                </div>
-                <div className="flex gap-1">
-                  {[2, 6, 7, 8, 0].map((n, i) => (
-                    <div key={i} className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center text-[8px] font-bold text-white">{n}</div>
-                  ))}
+                <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center backdrop-blur-md">
+                  <Timer className="w-6 h-6 text-white" />
                 </div>
               </div>
             </motion.div>
-          </div>
-        </div>
 
-        {/* Lottery List Section */}
-        <div className="px-4 mb-6 space-y-4">
-          <h3 className="text-lg font-bold text-white pl-2 border-l-4 border-blue-400">Lottery</h3>
-          <div className="space-y-3">
-            {[
-              { name: 'Win Go', icon: '🎰', color: 'from-blue-600 to-blue-800' },
-              { name: 'K3', icon: '🎲', color: 'from-purple-600 to-purple-800' },
-            ].map((game, i) => (
+            <div className="flex flex-col gap-4">
               <motion.div 
-                key={i}
                 whileTap={{ scale: 0.98 }}
-                className="bg-[#2b3270] rounded-2xl overflow-hidden shadow-lg border border-blue-900/50 flex items-center p-3 gap-4 cursor-pointer"
+                className="flex-1 bg-gradient-to-br from-blue-500 to-blue-600 rounded-3xl p-4 relative overflow-hidden shadow-lg group cursor-pointer"
                 onClick={() => onNavigate('wingo')}
               >
-                <div className={`w-16 h-16 rounded-xl bg-gradient-to-br ${game.color} flex items-center justify-center text-3xl shadow-inner`}>
-                  {game.icon}
+                <div className="relative z-10">
+                  <h4 className="text-sm font-black text-white italic">TRX WIN</h4>
+                  <p className="text-[8px] text-white/60 font-bold uppercase tracking-widest">Crypto Game</p>
                 </div>
-                <div className="flex-1 space-y-1">
-                  <div className="flex justify-between items-center">
-                    <h4 className="text-base font-bold text-white">{game.name}</h4>
-                    <Button size="sm" className="h-7 bg-blue-500 hover:bg-blue-600 text-white text-[10px] px-4 rounded-full">GO</Button>
-                  </div>
-                  <div className="bg-blue-900/30 p-2 rounded-lg flex justify-between items-center">
-                    <span className="text-[10px] text-blue-300">The highest bonus in history</span>
-                    <span className="text-[10px] font-bold text-blue-400">₹0.00</span>
-                  </div>
-                  <p className="text-[8px] text-blue-400 leading-tight">Through the platform WIN GO Hash lottery seed as the result of the lottery</p>
+                <div className="absolute bottom-3 right-3 w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Zap className="w-4 h-4 text-white" />
                 </div>
               </motion.div>
-            ))}
+
+              <motion.div 
+                whileTap={{ scale: 0.98 }}
+                className="flex-1 bg-gradient-to-br from-green-500 to-green-600 rounded-3xl p-4 relative overflow-hidden shadow-lg group cursor-pointer"
+                onClick={() => onNavigate('wingo')}
+              >
+                <div className="relative z-10">
+                  <h4 className="text-sm font-black text-white italic">5D LOTTO</h4>
+                  <p className="text-[8px] text-white/60 font-bold uppercase tracking-widest">Number Game</p>
+                </div>
+                <div className="absolute bottom-3 right-3 w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Gamepad className="w-4 h-4 text-white" />
+                </div>
+              </motion.div>
+            </div>
           </div>
         </div>
 
-        {/* Latest Offers & Events Section */}
-        <div className="px-4 mb-6 space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-bold text-white pl-2 border-l-4 border-blue-400">Offers & Events</h3>
-            <Button variant="ghost" size="sm" className="text-blue-400 text-xs" onClick={() => onNavigate('activity')}>
-              View All <ChevronRight className="w-3 h-3 ml-1" />
-            </Button>
+        {/* Winning List */}
+        <div className="px-4 mt-8 pb-8 space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="w-1 h-4 bg-yellow-500 rounded-full" />
+            <h3 className="text-sm font-black text-gray-800 uppercase tracking-widest">Winning List</h3>
           </div>
-          <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-            {activities.slice(0, 3).map((activity: any) => (
-              <motion.div 
-                key={activity.id}
-                whileTap={{ scale: 0.98 }}
-                className="min-w-[200px] h-28 bg-[#2b3270] rounded-xl overflow-hidden relative border border-blue-900/50 flex-shrink-0"
-                onClick={() => onNavigate('activity')}
-              >
-                <img src={activity.imageUrl} alt={activity.title} className="absolute inset-0 w-full h-full object-cover opacity-60" referrerPolicy="no-referrer" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent p-3 flex flex-col justify-end">
-                  <h4 className="text-xs font-bold text-white truncate">{activity.title}</h4>
+          <div className="bg-white rounded-3xl shadow-sm border border-gray-50 overflow-hidden min-h-[100px]">
+            {realWins.length === 0 ? (
+              <div className="p-12 text-center text-gray-300">
+                <Trophy className="w-10 h-10 mx-auto mb-2 opacity-10" />
+                <p className="text-[10px] font-bold uppercase tracking-widest">Waiting for next winners...</p>
+              </div>
+            ) : realWins.map((win, i) => (
+              <div key={win.id || i} className="flex items-center justify-between p-4 border-b border-gray-50 last:border-none">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center">
+                    <UserIcon className="w-5 h-5 text-red-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-gray-700">{win.user}</p>
+                    <p className="text-[9px] text-gray-400 font-medium whitespace-nowrap">Successfully withdraw {win.amount}</p>
+                  </div>
                 </div>
-              </motion.div>
+                <div className="text-right">
+                  <p className="text-xs font-black text-green-500">{win.amount}</p>
+                  <p className="text-[8px] text-gray-300 font-mono">Just now</p>
+                </div>
+              </div>
             ))}
           </div>
         </div>

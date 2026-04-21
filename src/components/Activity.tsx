@@ -6,121 +6,100 @@ import { Gift, Bell, ChevronRight, MessageSquare } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import Layout from './Layout';
-import { ActivityItem, GiftCard } from '../types';
+import { ActivityItem, GiftCard, User } from '../types';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, onSnapshot, query, orderBy, getDocs, where, doc, updateDoc, increment, addDoc, serverTimestamp } from 'firebase/firestore';
 
 interface ActivityProps {
   onNavigate: (page: any) => void;
+  user: User;
 }
 
-export default function Activity({ onNavigate }: ActivityProps) {
+export default function Activity({ onNavigate, user }: ActivityProps) {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [giftCode, setGiftCode] = useState('');
 
   useEffect(() => {
-    const savedActivitiesStr = localStorage.getItem('lakshmi_activities');
-    if (savedActivitiesStr === null) {
-      const defaultActivities = [
-        {
-          id: '1',
-          title: 'Welcome Bonus',
-          description: 'Get ₹100 on your first deposit!',
-          imageUrl: 'https://picsum.photos/seed/bonus/800/400',
-          type: 'banner',
-          createdAt: Date.now()
-        },
-        {
-          id: '2',
-          title: 'Daily Check-in',
-          description: 'Claim your daily rewards now.',
-          imageUrl: 'https://picsum.photos/seed/daily/800/400',
-          type: 'offer',
-          createdAt: Date.now()
-        }
-      ];
-      setActivities(defaultActivities);
-      localStorage.setItem('lakshmi_activities', JSON.stringify(defaultActivities));
-    } else {
-      setActivities(JSON.parse(savedActivitiesStr));
-    }
+    const q = query(collection(db, 'activities'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const activityData = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as ActivityItem))
+        .filter(act => act.type !== 'offer');
+      
+      if (activityData.length > 0) {
+        setActivities(activityData);
+      } else {
+        setActivities([
+          {
+            id: '1',
+            title: 'Welcome Event',
+            description: 'Join our community for exclusive rewards!',
+            imageUrl: 'https://picsum.photos/seed/bonus/800/400',
+            type: 'banner',
+            createdAt: Date.now()
+          }
+        ]);
+      }
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'activities'));
+
+    return () => unsubscribe();
   }, []);
 
-  const handleClaimGift = () => {
+  const handleClaimGift = async () => {
     if (!giftCode.trim()) {
       toast.error('Please enter a gift code');
       return;
     }
 
-    const giftCards: GiftCard[] = JSON.parse(localStorage.getItem('lakshmi_giftcards') || '[]');
-    const cardIndex = giftCards.findIndex(c => c.code === giftCode && c.status === 'available');
+    try {
+      const q = query(collection(db, 'giftcards'), where('code', '==', giftCode.trim()));
+      const querySnapshot = await getDocs(q);
 
-    if (cardIndex !== -1) {
-      const card = giftCards[cardIndex];
-      
-      // Get current user
-      const userStr = localStorage.getItem('lakshmi_user');
-      const user = userStr ? JSON.parse(userStr) : null;
-      
-      if (!user) {
-        toast.error('User not found. Please login again.');
+      if (querySnapshot.empty) {
+        toast.error('Invalid gift code');
         return;
       }
 
-      // Check if max uses reached (strictly 1 now)
-      if (card.usedCount >= 1 || card.status !== 'available') {
+      const cardDoc = querySnapshot.docs[0];
+      const cardData = cardDoc.data() as GiftCard;
+
+      if (cardData.status !== 'available' || cardData.usedCount >= 1) {
         toast.error('This gift code has already been claimed');
         return;
       }
 
       // Check min deposit requirement
-      // Use real user data from lakshmi_users for accurate totalDeposit
-      const allUsers = JSON.parse(localStorage.getItem('lakshmi_users') || '[]');
-      const currentUserData = allUsers.find((u: any) => u.phone === user.phone);
-      const totalDeposit = currentUserData ? currentUserData.totalDeposit : 0;
-
-      if (totalDeposit < card.minDeposit) {
-        toast.error(`You need a total deposit of at least ₹${card.minDeposit} to claim this gift card. Your current total deposit: ₹${totalDeposit}`);
+      if (user.totalDeposit < cardData.minDeposit) {
+        toast.error(`You need a total deposit of at least ₹${cardData.minDeposit} to claim this gift card. Your current total deposit: ₹${user.totalDeposit}`);
         return;
       }
 
-      // Update card
-      giftCards[cardIndex].usedCount = 1;
-      giftCards[cardIndex].status = 'claimed';
-      if (!giftCards[cardIndex].claimedBy) giftCards[cardIndex].claimedBy = [];
-      giftCards[cardIndex].claimedBy.push(user.phone);
-      
-      localStorage.setItem('lakshmi_giftcards', JSON.stringify(giftCards));
-
-      // Update balance
-      const currentBalance = parseFloat(localStorage.getItem('lakshmi_balance') || '0');
-      const newBalance = currentBalance + card.amount;
-      localStorage.setItem('lakshmi_balance', newBalance.toString());
-
-      // Update user balance in lakshmi_users as well for consistency
-      const updatedUsers = allUsers.map((u: any) => {
-        if (u.phone === user.phone) {
-          return { ...u, balance: u.balance + card.amount };
-        }
-        return u;
+      // Update card status
+      await updateDoc(doc(db, 'giftcards', cardDoc.id), {
+        status: 'claimed',
+        usedCount: 1,
+        claimedBy: [user.phone]
       });
-      localStorage.setItem('lakshmi_users', JSON.stringify(updatedUsers));
 
-      // Add to transaction history
-      const transactions = JSON.parse(localStorage.getItem('lakshmi_transactions') || '[]');
-      const newTransaction = {
-        id: Math.random().toString(36).substr(2, 9),
-        userId: user.phone,
+      // Update user balance
+      await updateDoc(doc(db, 'users', user.id), {
+        balance: increment(cardData.amount)
+      });
+
+      // Add transaction history
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.id,
         type: 'gift',
-        amount: card.amount,
+        amount: cardData.amount,
         status: 'completed',
-        timestamp: Date.now(),
-        description: `Gift card ${card.code} claimed`
-      };
-      localStorage.setItem('lakshmi_transactions', JSON.stringify([newTransaction, ...transactions]));
+        createdAt: serverTimestamp(),
+        description: `Gift card ${giftCode} claimed`
+      });
 
-      toast.success(`Successfully claimed ₹${card.amount}!`);
+      toast.success(`Successfully claimed ₹${cardData.amount}!`);
       setGiftCode('');
-    } else {
-      toast.error('Invalid or expired gift code');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'gift-claim');
     }
   };
 
@@ -132,30 +111,30 @@ export default function Activity({ onNavigate }: ActivityProps) {
         className="flex flex-col min-h-screen pb-20"
       >
         {/* Header */}
-        <div className="p-4 flex items-center justify-between bg-blue-600 text-white">
-          <h1 className="text-xl font-bold">Activity</h1>
-          <Button variant="ghost" size="icon" className="text-white">
+        <div className="p-4 flex items-center justify-between bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] text-white sticky top-0 z-50 shadow-md">
+          <h1 className="text-lg font-bold">Activity</h1>
+          <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
             <Bell className="w-6 h-6" />
           </Button>
         </div>
 
         {/* Gift Card Section */}
         <div className="p-4">
-          <Card className="border-none bg-[#2b3270] shadow-lg overflow-hidden">
+          <Card className="border-none bg-white shadow-sm rounded-2xl overflow-hidden border border-gray-50">
             <CardContent className="p-6 space-y-4">
-              <div className="flex items-center gap-3 text-blue-400">
+              <div className="flex items-center gap-3 text-red-500">
                 <Gift className="w-6 h-6" />
-                <h2 className="text-lg font-bold text-white">Claim Gift Card</h2>
+                <h2 className="text-base font-black uppercase tracking-tight">Claim Gift Card</h2>
               </div>
-              <p className="text-xs text-blue-300">Enter your gift code below to claim your reward.</p>
+              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Enter your gift code below to claim your reward.</p>
               <div className="flex gap-2">
                 <Input 
                   placeholder="Enter Gift Code" 
-                  className="bg-blue-900/30 border-blue-800/50 text-white"
+                  className="bg-gray-50 border-gray-100 text-gray-800 font-bold rounded-xl h-12"
                   value={giftCode}
                   onChange={(e) => setGiftCode(e.target.value)}
                 />
-                <Button onClick={handleClaimGift} className="bg-blue-500 hover:bg-blue-600">
+                <Button onClick={handleClaimGift} className="bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] hover:opacity-90 text-white font-bold rounded-xl h-12 px-6">
                   Claim
                 </Button>
               </div>
@@ -165,27 +144,33 @@ export default function Activity({ onNavigate }: ActivityProps) {
 
         {/* Activities List */}
         <div className="px-4 space-y-4">
-          <h3 className="text-sm font-bold text-white pl-2 border-l-4 border-blue-400">Latest Offers & Events</h3>
+          <div className="flex items-center gap-2 pl-2">
+            <div className="w-1 h-4 bg-red-500 rounded-full" />
+            <h3 className="text-xs font-black text-gray-800 uppercase tracking-widest">Latest Events</h3>
+          </div>
           {activities.map((activity) => (
             <motion.div 
               key={activity.id}
-              whileHover={{ scale: 1.02 }}
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
               className="group cursor-pointer"
             >
-              <Card className="border-none bg-[#2b3270] overflow-hidden shadow-md">
+              <Card className="border-none bg-white overflow-hidden shadow-sm rounded-2xl border border-gray-50">
                 <img 
                   src={activity.imageUrl} 
                   alt={activity.title} 
-                  className="w-full h-40 object-cover"
+                  className="w-full h-44 object-cover"
                   referrerPolicy="no-referrer"
                 />
                 <CardContent className="p-4 space-y-2">
-                  <div className="flex justify-between items-start">
+                  <div className="flex justify-between items-center">
                     <div>
-                      <h4 className="text-sm font-bold text-white">{activity.title}</h4>
-                      <p className="text-xs text-blue-300">{activity.description}</p>
+                      <h4 className="text-sm font-bold text-gray-800">{activity.title}</h4>
+                      <p className="text-[10px] text-gray-400 font-medium">{activity.description}</p>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-blue-400 group-hover:translate-x-1 transition-transform" />
+                    <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center text-red-500 group-hover:translate-x-1 transition-transform">
+                      <ChevronRight className="w-4 h-4" />
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -195,13 +180,18 @@ export default function Activity({ onNavigate }: ActivityProps) {
 
         {/* Support Section */}
         <div className="p-4 mt-4">
-          <Card className="border-none bg-blue-900/20 border border-blue-800/30">
+          <Card className="border-none bg-white shadow-sm rounded-2xl border border-gray-50">
             <CardContent className="p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <MessageSquare className="w-5 h-5 text-blue-400" />
-                <span className="text-xs text-white">Need help? Contact Support</span>
+                <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-gray-800">Need help?</span>
+                  <span className="text-[10px] text-gray-400">Contact our 24/7 support team</span>
+                </div>
               </div>
-              <Button variant="ghost" size="sm" className="text-blue-400 text-[10px]">
+              <Button variant="outline" size="sm" className="text-red-500 border-red-100 hover:bg-red-50 text-[10px] font-bold rounded-lg px-4 h-8">
                 Chat Now
               </Button>
             </CardContent>

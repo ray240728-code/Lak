@@ -70,93 +70,109 @@ export default function Wallet({ onNavigate, user }: WalletProps) {
       <motion.div 
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
-        className="flex flex-col min-h-screen pb-20"
+        className="flex flex-col min-h-screen pb-20 bg-[#f8f3f3]"
       >
         {/* Header */}
-        <div className="p-4 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-white">Wallet</h1>
-          <Button variant="ghost" size="icon" className="text-blue-300" onClick={() => handleAction('Customer Support')}>
+        <div className="p-4 flex items-center justify-between bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] text-white sticky top-0 z-50 shadow-md">
+          <h1 className="text-lg font-bold">Wallet</h1>
+          <Button variant="ghost" size="icon" className="text-white hover:bg-white/10" onClick={() => handleAction('Customer Support')}>
             <Headphones className="w-6 h-6" />
           </Button>
         </div>
 
         {/* Balance Card */}
-        <div className="px-4 mb-6">
-          <Card className="border-none bg-[#2b3270] shadow-lg overflow-hidden relative">
-            <div className="absolute top-0 left-0 w-full h-1 bg-blue-400" />
-            <CardContent className="p-6 space-y-6">
-              <div className="flex items-center gap-2 text-blue-200">
-                <WalletIcon className="w-4 h-4" />
-                <span className="text-sm font-medium">My balance:</span>
-              </div>
-              
-              <div className="flex items-center justify-center gap-4">
-                <h2 className="text-4xl font-bold text-white">₹{balance.toFixed(2)}</h2>
+        <div className="p-4">
+          <div className="bg-gradient-to-b from-[#ff7e7e] to-[#ff4d4d] rounded-3xl p-8 text-white shadow-xl relative overflow-hidden">
+            <div className="relative z-10 flex flex-col items-center gap-4">
+              <div className="flex items-center gap-3">
+                <h2 className="text-4xl font-black tracking-tighter">₹{balance.toFixed(2)}</h2>
                 <RefreshCw 
-                  className="w-6 h-6 text-blue-400 cursor-pointer hover:rotate-180 transition-transform duration-500" 
+                  className="w-6 h-6 text-white/70 cursor-pointer hover:rotate-180 transition-transform duration-500" 
                   onClick={refreshBalance}
                 />
               </div>
-
-              <div className="flex justify-between text-center pt-4 border-t border-blue-900/50">
-                <div className="flex-1">
-                  <p className="text-xs text-blue-300 mb-1">Total Recharge</p>
-                  <p className="text-sm font-bold text-white">₹{stats.recharge.toFixed(2)}</p>
+              <div className="flex items-center gap-2 bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
+                <WalletIcon className="w-3 h-3" />
+                <span className="text-[10px] font-bold uppercase tracking-widest">Total Balance</span>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-8 w-full mt-6 pt-6 border-t border-white/10">
+                <div className="text-center space-y-1">
+                  <p className="text-[9px] text-white/60 font-bold uppercase tracking-widest">Total Recharge</p>
+                  <p className="text-sm font-black">₹{stats.recharge.toFixed(2)}</p>
                 </div>
-                <div className="w-px bg-blue-900/50 h-8 self-center" />
-                <div className="flex-1">
-                  <p className="text-xs text-blue-300 mb-1">Total Withdrawal</p>
-                  <p className="text-sm font-bold text-white">₹{stats.withdrawal.toFixed(2)}</p>
+                <div className="text-center space-y-1">
+                  <p className="text-[9px] text-white/60 font-bold uppercase tracking-widest">Total Withdraw</p>
+                  <p className="text-sm font-black">₹{stats.withdrawal.toFixed(2)}</p>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+            {/* Decorative circles */}
+            <div className="absolute -top-12 -right-12 w-32 h-32 bg-white/10 rounded-full blur-2xl" />
+            <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-black/10 rounded-full blur-2xl" />
+          </div>
         </div>
 
-        {/* Wallet Circles */}
+        {/* Wallet Progress */}
         <div className="px-4 grid grid-cols-2 gap-4 mb-8">
-          <motion.div whileHover={{ scale: 1.05 }} className="flex flex-col items-center gap-2">
-            <div className="w-24 h-24 rounded-full border-4 border-blue-400 flex flex-col items-center justify-center bg-[#2b3270]">
-              <span className="text-xs font-bold text-white">0%</span>
-              <span className="text-[10px] text-blue-300">₹{balance.toFixed(2)}</span>
+          <motion.div whileHover={{ scale: 1.02 }} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-50 flex flex-col items-center gap-3">
+            <div className="relative w-24 h-24">
+              <svg className="w-full h-full" viewBox="0 0 36 36">
+                <path className="text-gray-100" strokeDasharray="100, 100" strokeWidth="3" fill="none" stroke="currentColor" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <path className="text-red-500" strokeDasharray="100, 100" strokeWidth="3" strokeLinecap="round" fill="none" stroke="currentColor" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-sm font-black text-gray-800">100%</span>
+              </div>
             </div>
-            <span className="text-xs text-blue-200">Main wallet</span>
+            <div className="text-center">
+              <p className="text-xs font-black text-gray-800">₹{balance.toFixed(2)}</p>
+              <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Main Wallet</p>
+            </div>
           </motion.div>
-          <motion.div whileHover={{ scale: 1.05 }} className="flex flex-col items-center gap-2">
-            <div className="w-24 h-24 rounded-full border-4 border-blue-900 flex flex-col items-center justify-center bg-[#2b3270]">
-              <span className="text-xs font-bold text-white">0%</span>
-              <span className="text-[10px] text-blue-300">₹0.00</span>
+          
+          <motion.div whileHover={{ scale: 1.02 }} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-50 flex flex-col items-center gap-3">
+            <div className="relative w-24 h-24">
+              <svg className="w-full h-full" viewBox="0 0 36 36">
+                <path className="text-gray-100" strokeDasharray="100, 100" strokeWidth="3" fill="none" stroke="currentColor" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-sm font-black text-gray-300">0%</span>
+              </div>
             </div>
-            <span className="text-xs text-blue-200">3rd party wallet</span>
+            <div className="text-center">
+              <p className="text-xs font-black text-gray-300">₹0.00</p>
+              <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">P3 Wallet</p>
+            </div>
           </motion.div>
         </div>
 
         {/* Action Buttons */}
-        <div className="px-4 space-y-6">
+        <div className="px-4 space-y-8">
           <Button 
-            className="w-full h-12 bg-blue-400 hover:bg-blue-500 text-white font-bold text-lg rounded-full"
+            className="w-full h-14 bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] hover:opacity-90 text-white font-black text-sm rounded-2xl shadow-lg shadow-red-100 uppercase tracking-widest"
             onClick={() => handleAction('Deposit')}
           >
-            MAIN WALLET DEPOSIT
+            Main Wallet Deposit
           </Button>
 
           <div className="grid grid-cols-4 gap-4">
             {[
-              { icon: CreditCard, label: 'Deposit', color: 'bg-orange-500' },
-              { icon: TrendingUp, label: 'Withdraw', color: 'bg-blue-500' },
-              { icon: History, label: 'Deposit History', color: 'bg-red-500' },
-              { icon: History, label: 'Withdraw History', color: 'bg-yellow-500' },
+              { icon: CreditCard, label: 'Deposit', color: 'text-orange-500', bg: 'bg-orange-50' },
+              { icon: TrendingUp, label: 'Withdraw', color: 'text-blue-500', bg: 'bg-blue-50' },
+              { icon: History, label: 'Dep. History', color: 'text-red-500', bg: 'bg-red-50' },
+              { icon: History, label: 'Wit. History', color: 'text-purple-500', bg: 'bg-purple-50' },
             ].map((item, i) => (
               <motion.button 
                 key={i}
                 whileTap={{ scale: 0.9 }}
-                className="flex flex-col items-center gap-2"
+                className="flex flex-col items-center gap-3"
                 onClick={() => handleAction(item.label)}
               >
-                <div className={`w-12 h-12 rounded-xl ${item.color} flex items-center justify-center shadow-lg`}>
-                  <item.icon className="w-6 h-6 text-white" />
+                <div className={`w-14 h-14 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center shadow-sm border border-white`}>
+                  <item.icon className="w-6 h-6" />
                 </div>
-                <span className="text-[10px] text-blue-200 text-center leading-tight">{item.label}</span>
+                <span className="text-[10px] text-gray-500 font-bold text-center leading-tight uppercase tracking-tighter">{item.label}</span>
               </motion.button>
             ))}
           </div>

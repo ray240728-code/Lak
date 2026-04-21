@@ -62,9 +62,9 @@ export default function HistoryPage({ title, type, onBack, user }: HistoryPagePr
   };
 
   return (
-    <div className="min-h-screen bg-[#1a1a2e] text-white flex flex-col">
-      <div className="p-4 flex items-center gap-4 bg-[#2b3270] border-b border-blue-900/50">
-        <Button variant="ghost" size="icon" onClick={onBack}>
+    <div className="min-h-screen bg-[#f8f3f3] text-gray-900 flex flex-col">
+      <div className="p-4 flex items-center gap-4 bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] text-white shadow-md">
+        <Button variant="ghost" size="icon" onClick={onBack} className="text-white hover:bg-white/10">
           <ChevronLeft className="w-6 h-6" />
         </Button>
         <h1 className="text-xl font-bold">{title}</h1>
@@ -72,16 +72,16 @@ export default function HistoryPage({ title, type, onBack, user }: HistoryPagePr
 
       <div className="p-4 flex gap-2">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-300" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-red-300" />
           <input 
             placeholder="Search history..." 
-            className="w-full pl-10 pr-4 py-2 bg-[#2b3270] border-none rounded-lg text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none"
+            className="w-full pl-10 pr-4 py-2 bg-white border border-gray-100 rounded-lg text-xs text-gray-800 shadow-sm focus:ring-1 focus:ring-red-500 outline-none"
           />
         </div>
-        <Button variant="ghost" size="icon" className="bg-[#2b3270] text-blue-300">
+        <Button variant="ghost" size="icon" className="bg-white text-red-500 shadow-sm border border-gray-100">
           <Filter className="w-4 h-4" />
         </Button>
-        <Button variant="ghost" size="icon" className="bg-[#2b3270] text-blue-300">
+        <Button variant="ghost" size="icon" className="bg-white text-red-500 shadow-sm border border-gray-100">
           <Calendar className="w-4 h-4" />
         </Button>
       </div>
@@ -93,45 +93,45 @@ export default function HistoryPage({ title, type, onBack, user }: HistoryPagePr
       >
         {loading ? (
           <div className="flex items-center justify-center h-40">
-            <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <div className="w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full animate-spin"></div>
           </div>
         ) : items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 text-blue-300">
+          <div className="flex flex-col items-center justify-center h-40 text-gray-400">
             <p className="text-xs">No records found</p>
           </div>
         ) : (
           items.map((item, index) => (
-            <Card key={item.id || index} className="border-none bg-[#2b3270] overflow-hidden shadow-md">
+            <Card key={item.id || index} className="border-none bg-white overflow-hidden shadow-sm border border-gray-100">
               <CardContent className="p-4 flex justify-between items-center">
                 <div className="space-y-1">
-                  <p className="text-sm font-bold text-white">
+                  <p className="text-sm font-bold text-gray-800">
                     {type === 'bet' ? `WinGo ${item.roundId.slice(-4)}` : item.description || item.type}
                   </p>
-                  <p className="text-[10px] text-blue-300">
+                  <p className="text-[10px] text-gray-400">
                     {formatDate(item.timestamp || Date.now())}
                   </p>
                   {item.orderNumber && (
-                    <p className="text-[9px] text-blue-400 font-bold uppercase tracking-tighter">
+                    <p className="text-[9px] text-red-400 font-bold uppercase tracking-tighter">
                       Order: {item.orderNumber}
                     </p>
                   )}
                   {type === 'bet' && (
-                    <p className="text-[10px] text-blue-400">Selection: {item.selection}</p>
+                    <p className="text-[10px] text-red-500 font-medium">Selection: {item.selection}</p>
                   )}
                 </div>
                 <div className="text-right">
                   <p className={`text-sm font-bold ${
                     item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' 
-                      ? 'text-green-400' 
-                      : 'text-red-400'
+                      ? 'text-green-500' 
+                      : 'text-red-500'
                   }`}>
                     {item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' ? '+' : '-'}
                     ₹{item.amount.toFixed(2)}
                   </p>
                   <p className={`text-[10px] ${
                     item.status === 'completed' || item.status === 'approved' || item.status === 'win' || item.status === 'loss'
-                      ? 'text-blue-300' 
-                      : 'text-yellow-400'
+                      ? 'text-gray-400' 
+                      : 'text-orange-500 font-bold'
                   }`}>
                     {item.status}
                   </p>
