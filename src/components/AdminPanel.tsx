@@ -40,7 +40,7 @@ export default function AdminPanel({ onNavigate, user }) {
   // ===============================
   const setManualPrediction = async (mode, roundType, number) => {
     try {
-      const predRef = doc(db, "config", prediction_${mode});
+      const predRef = doc(db, "config", `prediction_${mode}`);
       const predSnap = await getDoc(predRef);
       const currentData = predSnap.exists() ? predSnap.data() : {};
 
@@ -67,8 +67,8 @@ export default function AdminPanel({ onNavigate, user }) {
 
       await setDoc(predRef, {
         ...currentData,
-        [${roundType}RoundId]: roundId,
-        [${roundType}Result]: result
+        [`${roundType}RoundId`]: roundId,
+        [`${roundType}Result`]: result
       }, { merge: true });
 
       toast.success("Prediction updated!");
