@@ -369,42 +369,59 @@ export default function App() {
         }
       }
 
-      // Handle referral logic asynchronously
-      if (inviteCode) {
-        console.log(`Processing referral: ${inviteCode}`);
-        (async () => {
-          try {
-            const usersRef = collection(db, 'users');
-            let referrerDoc = null;
-
-            // 1. Try to get by UID directly first (fastest)
-            const docRef = doc(db, 'users', inviteCode);
-            const docSnap = await getDoc(docRef);
-            
-            if (docSnap.exists()) {
-              referrerDoc = docSnap;
-            } else {
-              // 2. Try to search by phone if UID lookup failed
-              const qPhone = query(usersRef, where('phone', '==', inviteCode));
-              const qSnapPhone = await getDocs(qPhone);
-              if (!qSnapPhone.empty) {
-                referrerDoc = qSnapPhone.docs[0];
+        // Handle referral logic asynchronously
+        if (inviteCode) {
+          console.log(`Processing referral: ${inviteCode}`);
+          (async () => {
+            try {
+              const usersRef = collection(db, 'users');
+              let referrerDoc = null;
+  
+              // 1. Try to get by UID directly first (fastest)
+              try {
+                const docRef = doc(db, 'users', inviteCode);
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                  referrerDoc = docSnap;
+                }
+              } catch (e) {
+                console.log("Direct UID lookup skipped/failed");
               }
+              
+              if (!referrerDoc) {
+                // 2. Try to search by phone or ID field if direct lookup failed
+                const qPhone = query(usersRef, where('phone', '==', inviteCode));
+                const qId = query(usersRef, where('id', '==', inviteCode));
+                const [qSnapPhone, qSnapId] = await Promise.all([getDocs(qPhone), getDocs(qId)]);
+                
+                if (!qSnapPhone.empty) {
+                  referrerDoc = qSnapPhone.docs[0];
+                } else if (!qSnapId.empty) {
+                  referrerDoc = qSnapId.docs[0];
+                }
+              }
+  
+              if (referrerDoc) {
+                console.log(`Referrer found: ${referrerDoc.id}, incrementing count`);
+                // Update the new user's document to use the normalized UID if it was different
+                if (userData.id && inviteCode !== referrerDoc.id) {
+                  try {
+                    await updateDoc(doc(db, 'users', userData.id), { referredBy: referrerDoc.id });
+                  } catch (updateErr) {
+                    console.error("Failed to normalize referredBy field:", updateErr);
+                  }
+                }
+                await updateDoc(doc(db, 'users', referrerDoc.id), { 
+                  referralCount: increment(1) 
+                });
+              } else {
+                console.warn(`Referrer not found for code: ${inviteCode}`);
+              }
+            } catch (refError) {
+              console.error("Referral update failed (non-critical):", refError);
             }
-
-            if (referrerDoc) {
-              console.log(`Referrer found: ${referrerDoc.id}, incrementing count`);
-              await updateDoc(doc(db, 'users', referrerDoc.id), { 
-                referralCount: increment(1) 
-              });
-            } else {
-              console.warn(`Referrer not found for code: ${inviteCode}`);
-            }
-          } catch (refError) {
-            console.error("Referral update failed (non-critical):", refError);
-          }
-        })();
-      }
+          })();
+        }
 
       // Success! Set state and move to home
       setUser(userData);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,7 +14,7 @@ interface DepositProps {
 }
 
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, addDoc, serverTimestamp, doc, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 
 export default function Deposit({ onBack, user }: DepositProps) {
   const [amount, setAmount] = useState('');
@@ -79,14 +79,30 @@ export default function Deposit({ onBack, user }: DepositProps) {
     setStep(2);
   };
 
+  const isSubmittingRef = useRef(false);
   const handleSubmit = async () => {
     if (!utr || utr.length < 12) {
       toast.error('Please enter a valid 12-digit UTR number');
       return;
     }
 
+    if (isSubmittingRef.current || isSubmitting) return;
+
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     try {
+      // Check for duplicate UTR before submitting
+      const depositsRef = collection(db, 'deposits');
+      const q = query(depositsRef, where('utr', '==', utr));
+      const qSnap = await getDocs(q);
+      
+      if (!qSnap.empty) {
+        toast.error('This UTR has already been submitted');
+        setIsSubmitting(false);
+        isSubmittingRef.current = false;
+        return;
+      }
+
       const newRequest = {
         userId: user.id,
         phone: user.phone,
@@ -105,6 +121,7 @@ export default function Deposit({ onBack, user }: DepositProps) {
       handleFirestoreError(error, OperationType.CREATE, 'deposits');
     } finally {
       setIsSubmitting(false);
+      isSubmittingRef.current = false;
     }
   };
 

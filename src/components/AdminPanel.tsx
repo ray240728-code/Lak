@@ -406,10 +406,26 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
         if (bonusAmount > 0) {
           // Find referrer
           const usersRef = collection(db, 'users');
-          const q = query(usersRef, where('id', '==', userData.referredBy));
-          const qPhone = query(usersRef, where('phone', '==', userData.referredBy));
-          const [qSnap, qSnapPhone] = await Promise.all([getDocs(q), getDocs(qPhone)]);
-          const referrerDoc = qSnap.docs[0] || qSnapPhone.docs[0];
+          let referrerDoc = null;
+
+          // 1. Try to get by UID directly first (fastest)
+          try {
+            const docRef = doc(db, 'users', userData.referredBy);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+              referrerDoc = docSnap;
+            }
+          } catch (e) {
+            console.log("Direct UID lookup for bonus failed");
+          }
+
+          if (!referrerDoc) {
+            // 2. Try to search by phone or ID field if direct lookup failed
+            const q = query(usersRef, where('id', '==', userData.referredBy));
+            const qPhone = query(usersRef, where('phone', '==', userData.referredBy));
+            const [qSnap, qSnapPhone] = await Promise.all([getDocs(q), getDocs(qPhone)]);
+            referrerDoc = qSnap.docs[0] || qSnapPhone.docs[0];
+          }
 
           if (referrerDoc) {
             const referrerRef = doc(db, 'users', referrerDoc.id);
