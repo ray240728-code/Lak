@@ -21,10 +21,24 @@ export const getBigSmallForResult = (num: number): BigSmall => {
 };
 
 export const generateRoundResult = (roundId: string): { color: Color[]; number: Number; bigSmall: BigSmall } => {
-  // In a real app, this would come from the server
-  // For this demo, we'll use the roundId as a seed for pseudo-randomness
-  const seed = parseInt(roundId.slice(-4), 16) || Math.floor(Math.random() * 1000);
-  const num = (seed % 10) as Number;
+  // Use a more robust deterministic random generation
+  // We use a combination of the roundId and multiple hashing passes
+  const salt = "lakshmi_club_secure_v2_2026";
+  const combined = roundId + salt;
+  
+  let hash = 2166136261; // FNV offset basis
+  for (let i = 0; i < combined.length; i++) {
+    hash ^= combined.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  
+  // Further scramble the hash to ensure high entropy in the lower digits
+  hash = (hash ^ (hash >> 16)) * 0x85ebca6b;
+  hash = (hash ^ (hash >> 13)) * 0xc2b2ae35;
+  hash = hash ^ (hash >> 16);
+  
+  const num = (Math.abs(hash) % 10) as Number;
+  
   return {
     color: getColorForResult(num),
     number: num,
@@ -38,7 +52,7 @@ export const calculatePayout = (bet: Bet, result: { color: Color[]; number: Numb
   // If selection is a number
   if (typeof selection === 'number') {
     if (selection === result.number) {
-      return amount * 2; // User requested 2x for a win (100 -> 200)
+      return amount * 9; // Number guess usually pays 9x (including stake) or 8x + stake
     }
     return 0;
   }
@@ -46,7 +60,11 @@ export const calculatePayout = (bet: Bet, result: { color: Color[]; number: Numb
   // If selection is a color
   if (selection === 'red' || selection === 'green' || selection === 'violet') {
     if (result.color.includes(selection)) {
-      return amount * 2; // User requested 2x for a win (100 -> 200)
+      // Special payout for violet (2.5x if split, or similar)
+      // Usually Red/Green pays 2x, Violet pays 4.5x
+      if (selection === 'violet') return amount * 4.5;
+      if (result.color.includes('violet')) return amount * 1.5; // If red+violet and you bet red, you get 1.5x
+      return amount * 2;
     }
     return 0;
   }
@@ -54,7 +72,7 @@ export const calculatePayout = (bet: Bet, result: { color: Color[]; number: Numb
   // If selection is Big/Small
   if (selection === 'big' || selection === 'small') {
     if (selection === result.bigSmall) {
-      return amount * 2; // User requested 2x for a win (100 -> 200)
+      return amount * 2;
     }
     return 0;
   }
@@ -63,10 +81,14 @@ export const calculatePayout = (bet: Bet, result: { color: Color[]; number: Numb
 };
 
 export const getRoundId = (mode: GameMode, timestamp: number): string => {
-  const date = new Date(timestamp);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  // Use IST (UTC+5:30) as many of these applications are calibrated to Indian Standard Time
+  // This helps match the user's expectation of round IDs (e.g., round 1157 in the evening)
+  const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+  const date = new Date(timestamp + IST_OFFSET);
+  
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
   
   let interval = 1;
   let modeCode = '01';
@@ -74,7 +96,9 @@ export const getRoundId = (mode: GameMode, timestamp: number): string => {
   if (mode === '5min') { interval = 5; modeCode = '05'; }
   if (mode === '10min') { interval = 10; modeCode = '10'; }
   
-  const totalMinutes = date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
-  const roundNum = Math.floor(totalMinutes / interval);
+  // Calculate total minutes passed in the IST day
+  const totalMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
+  const roundNum = Math.floor(totalMinutes / interval) + 1; // 1-indexed count
+  
   return `${year}${month}${day}${modeCode}${String(roundNum).padStart(4, '0')}`;
 };

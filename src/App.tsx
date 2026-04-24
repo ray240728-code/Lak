@@ -65,6 +65,8 @@ export default function App() {
           role: firebaseUser.email === 'purnundurayr@gmail.com' ? 'admin' : 'user',
           createdAt: Date.now(),
           referralCount: 0,
+          referralDepositCount: 0,
+          referralDepositAmount: 0,
           totalDeposit: 0
         };
         try {
@@ -355,6 +357,8 @@ export default function App() {
           role: phone === '9999999999' ? 'admin' : 'user',
           referredBy: inviteCode || null,
           referralCount: 0,
+          referralDepositCount: 0,
+          referralDepositAmount: 0,
           createdAt: Date.now()
         };
         try {

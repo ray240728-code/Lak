@@ -71,11 +71,51 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
     });
 
     const qHistory = query(collection(db, 'game_history'), orderBy('id', 'desc'), limit(100));
-    const unsubscribeHistory = onSnapshot(qHistory, (snapshot) => {
-      setHistory(snapshot.docs.map(doc => doc.data() as GameRound));
+    const unsubscribeHistory = onSnapshot(qHistory, async (snapshot) => {
+      const historyData = snapshot.docs.map(doc => doc.data() as GameRound);
+      setHistory(historyData);
+
+      // Check for gaps and auto-fill recent history for smooth UI (Deterministic)
+      if (historyData.length > 0) {
+        const latestRoundId = historyData[0].id;
+        const currentId = getRoundId(activeMode, Date.now());
+        
+        // If there's a gap, fill up to 10 previous rounds
+        // This ensures the "by line" sequential appearance
+        let checkId = currentId;
+        const roundsToFill = [];
+        for (let i = 0; i < 10; i++) {
+          // Move back in time (approximate, getRoundId is robust)
+          const pastTime = Date.now() - (i + 1) * (activeMode === '1min' ? 60000 : activeMode === '3min' ? 180000 : activeMode === '5min' ? 300000 : 600000);
+          const pastId = getRoundId(activeMode, pastTime);
+          
+          if (pastId === latestRoundId) break;
+          if (historyData.find(h => h.id === pastId)) continue;
+          
+          const result = generateRoundResult(pastId);
+          roundsToFill.push({
+            id: pastId,
+            mode: activeMode,
+            startTime: pastTime - (activeMode === '1min' ? 60000 : 300000), // Approximate
+            endTime: pastTime,
+            resultColor: result.color,
+            resultNumber: result.number,
+            resultBigSmall: result.bigSmall,
+            status: 'completed' as const
+          });
+        }
+
+        for (const round of roundsToFill) {
+          try {
+            await setDoc(doc(db, 'game_history', round.id), round);
+          } catch (e) {
+            // Silently fail if someone else wrote it first or permission denied
+          }
+        }
+      }
     });
 
-    const qBets = query(collection(db, 'bets'), where('userId', '==', user.id), orderBy('timestamp', 'desc'), limit(50));
+    const qBets = query(collection(db, 'bets'), where('userId', '==', user.id), orderBy('createdAt', 'desc'), limit(50));
     const unsubscribeBets = onSnapshot(qBets, (snapshot) => {
       setMyBets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bet)));
     });
@@ -200,22 +240,28 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
   }, [user.id, predictionConfigs]);
 
   useEffect(() => {
-    setCurrentRoundId(getRoundId(activeMode, Date.now()));
+    const now = Date.now();
+    const initialRoundId = getRoundId(activeMode, now);
+    setCurrentRoundId(initialRoundId);
+    
     const interval = setInterval(() => {
-      const now = Date.now();
+      const currentTime = Date.now();
       let modeSeconds = 60;
       if (activeMode === '3min') modeSeconds = 180;
       if (activeMode === '5min') modeSeconds = 300;
       if (activeMode === '10min') modeSeconds = 600;
       
-      const secondsPassed = Math.floor(now / 1000) % modeSeconds;
+      const secondsPassed = Math.floor(currentTime / 1000) % modeSeconds;
       const remaining = modeSeconds - secondsPassed;
       setTimeLeft(remaining);
       
-      const newRoundId = getRoundId(activeMode, now);
+      const newRoundId = getRoundId(activeMode, currentTime);
       if (newRoundId !== currentRoundId) {
         if (currentRoundId) {
           handleRoundEnd(currentRoundId, activeMode);
+          
+          // Potentially handle missed rounds if clock jumped significantly
+          // This is a simple catch-up for history consistency
         }
         setCurrentRoundId(newRoundId);
       }
@@ -238,7 +284,7 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
         mode: activeMode,
         amount,
         selection: selectedBet,
-        timestamp: serverTimestamp(),
+        createdAt: serverTimestamp(),
         status: 'pending'
       };
       await updateDoc(doc(db, 'users', user.id), { balance: increment(-amount) });

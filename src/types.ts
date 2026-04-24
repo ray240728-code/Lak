@@ -9,9 +9,14 @@ export interface Bet {
   mode: GameMode;
   amount: number;
   selection: Color | Number | BigSmall;
-  timestamp: number;
+  createdAt: any;
   status: 'pending' | 'win' | 'loss';
   payout?: number;
+  result?: {
+    number: number;
+    color: string[];
+    bigSmall: string;
+  };
 }
 
 export interface GameRound {
@@ -42,10 +47,10 @@ export interface GiftCard {
 export interface Transaction {
   id: string;
   userId: string;
-  type: 'deposit' | 'withdrawal' | 'bet' | 'win' | 'gift';
+  type: 'deposit' | 'withdrawal' | 'bet' | 'win' | 'gift' | 'referral';
   amount: number;
   status: 'pending' | 'completed' | 'failed';
-  timestamp: number;
+  createdAt: number;
   description: string;
   orderNumber?: string;
 }
@@ -105,5 +110,7 @@ export interface User {
   role: 'user' | 'admin';
   referredBy?: string;
   referralCount: number;
+  referralDepositCount: number;
+  referralDepositAmount: number;
   createdAt: number;
 }

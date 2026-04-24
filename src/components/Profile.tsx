@@ -142,7 +142,7 @@ export default function Profile({ onNavigate, onLogout, user, onClearCache }: Pr
           type: 'gift',
           amount: giftData.amount,
           status: 'completed',
-          timestamp: Date.now(),
+          createdAt: Date.now(),
           description: `Gift card redemption: ${giftCode}`
         });
       });

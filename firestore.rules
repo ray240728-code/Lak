@@ -29,7 +29,8 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && 
         (request.auth.token.email == "purnundurayr@gmail.com" ||
-         request.auth.token.email == "9999999999@lakshmi.club");
+         request.auth.token.email == "9999999999@lakshmi.club" ||
+         exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
     }
 
     // Helper for string validation
@@ -54,19 +55,21 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      let requiredFields = ['id', 'phone', 'name', 'balance', 'status', 'role', 'createdAt', 'totalDeposit', 'referralCount'];
+      let requiredFields = ['id', 'phone', 'name', 'balance', 'status', 'role', 'createdAt', 'totalDeposit', 'referralCount', 'referralDepositCount', 'referralDepositAmount'];
       return data.keys().hasAll(requiredFields) &&
              isValidString(data.phone, 20) &&
              isValidString(data.name, 50) && data.name.size() > 0 &&
              data.balance is number &&
              data.totalDeposit is number &&
              data.referralCount is number &&
+             data.referralDepositCount is number &&
+             data.referralDepositAmount is number &&
              data.role in ['user', 'admin'] &&
              data.status in ['active', 'blocked'];
     }
 
     function isValidBet(data) {
-      let requiredFields = ['userId', 'roundId', 'mode', 'amount', 'selection', 'status', 'timestamp'];
+      let requiredFields = ['userId', 'roundId', 'mode', 'amount', 'selection', 'status', 'createdAt'];
       return data.keys().hasAll(requiredFields) &&
              data.userId == request.auth.uid &&
              isValidString(data.roundId, 50) &&
@@ -101,7 +104,11 @@ service cloud.firestore {
         (isOwner(userId) && 
          incoming().role == existing().role && 
          incoming().status == existing().status &&
-         (incoming().diff(existing()).affectedKeys().hasOnly(['balance', 'totalDeposit', 'referralCount', 'name'])))
+         (incoming().diff(existing()).affectedKeys().hasOnly(['balance', 'totalDeposit', 'referralCount', 'name']))) ||
+        // Allow anyone to increment referralCount of another user by exactly 1 (used for referrals)
+        (incoming().diff(existing()).affectedKeys().size() == 1 && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['referralCount']) &&
+         incoming().referralCount == existing().referralCount + 1)
       );
     }
 
@@ -143,16 +150,23 @@ service cloud.firestore {
     }
 
     match /deposits/{depositId} {
-      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && incoming().userId == request.auth.uid;
+      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.phone + "@lakshmi.club" == request.auth.token.email || isAdmin());
+      allow list: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid || resource.data.phone + "@lakshmi.club" == request.auth.token.email);
+      allow create: if isAuthenticated() && (incoming().userId == request.auth.uid || request.auth.token.email == incoming().userId + "@lakshmi.club");
       allow update: if isAdmin();
     }
 
     match /withdrawals/{withdrawalId} {
-      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && incoming().userId == request.auth.uid;
+      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.phone + "@lakshmi.club" == request.auth.token.email || isAdmin());
+      allow list: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid || resource.data.phone + "@lakshmi.club" == request.auth.token.email);
+      allow create: if isAuthenticated() && (incoming().userId == request.auth.uid || request.auth.token.email == incoming().userId + "@lakshmi.club");
+      allow update: if isAdmin();
+    }
+
+    match /transactions/{transactionId} {
+      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.phone + "@lakshmi.club" == request.auth.token.email || isAdmin());
+      allow list: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid || resource.data.phone + "@lakshmi.club" == request.auth.token.email);
+      allow create: if isAuthenticated() && (incoming().userId == request.auth.uid || request.auth.token.email == incoming().userId + "@lakshmi.club" || isAdmin());
       allow update: if isAdmin();
     }
 

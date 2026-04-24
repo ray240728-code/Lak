@@ -232,7 +232,7 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
       (error) => console.error("Withdrawals sync error:", error)
     );
 
-    const unsubscribeBets = onSnapshot(query(collection(db, 'bets'), orderBy('timestamp', 'desc'), limit(100)), 
+    const unsubscribeBets = onSnapshot(query(collection(db, 'bets'), orderBy('createdAt', 'desc'), limit(100)), 
       (snapshot) => {
         setBets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       },
@@ -361,13 +361,67 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
     if (!request) return;
     try {
       const userRef = doc(db, 'users', request.userId);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        toast.error('User not found');
+        return;
+      }
+      const userData = userSnap.data() as User;
+      const isFirstDeposit = !userData.totalDeposit || userData.totalDeposit === 0;
+
+      // Update user balance and totalDeposit
       await updateDoc(userRef, {
         balance: increment(request.amount),
         totalDeposit: increment(request.amount)
       });
+
+      // Add transaction record for users' deposit
+      await addDoc(collection(db, 'transactions'), {
+        userId: request.userId,
+        type: 'deposit',
+        amount: request.amount,
+        status: 'completed',
+        createdAt: Date.now(),
+        description: `Deposit Approved (Order: ${request.orderNumber})`
+      });
+
+      // Referral Bonus Logic: 30% of first deposit
+      if (isFirstDeposit && userData.referredBy) {
+        const bonusAmount = Math.floor(request.amount * 0.3);
+        if (bonusAmount > 0) {
+          // Find referrer
+          const usersRef = collection(db, 'users');
+          const q = query(usersRef, where('id', '==', userData.referredBy));
+          const qPhone = query(usersRef, where('phone', '==', userData.referredBy));
+          const [qSnap, qSnapPhone] = await Promise.all([getDocs(q), getDocs(qPhone)]);
+          const referrerDoc = qSnap.docs[0] || qSnapPhone.docs[0];
+
+          if (referrerDoc) {
+            const referrerRef = doc(db, 'users', referrerDoc.id);
+            await updateDoc(referrerRef, {
+              balance: increment(bonusAmount),
+              referralDepositCount: increment(1),
+              referralDepositAmount: increment(request.amount)
+            });
+
+            // Add transaction for referrer
+            await addDoc(collection(db, 'transactions'), {
+              userId: referrerDoc.id,
+              type: 'referral',
+              amount: bonusAmount,
+              status: 'completed',
+              createdAt: Date.now(),
+              description: `Referral bonus from ${userData.phone || userData.name}'s first deposit`
+            });
+            console.log(`Credited referral bonus of ₹${bonusAmount} to user ${referrerDoc.id}`);
+          }
+        }
+      }
+
       await updateDoc(doc(db, 'deposits', id), { status: 'completed' });
       toast.success('Deposit approved!');
     } catch (error) {
+      console.error("Deposit approval error:", error);
       handleFirestoreError(error, OperationType.UPDATE, 'deposits');
     }
   };
@@ -631,12 +685,15 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
                             </div>
                             <div>
                               <h4 className="text-sm font-black text-slate-900 tracking-tight">{u.name || 'Anonymous User'}</h4>
-                              <p className="text-[10px] font-mono text-slate-400 tracking-wider font-medium">{u.phone || 'NO_PHONE_LINKED'}</p>
+                              <p className="text-[10px] font-mono text-slate-400 tracking-wider font-medium">{u.phone || 'NO_PHONE_LINKED'} | {new Date(u.createdAt).toLocaleDateString()}</p>
                             </div>
                           </div>
-                          <Badge className={`text-[8px] font-black tracking-widest px-2 py-0.5 rounded-full border-none shadow-none uppercase ${u.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                            {u.status || 'active'}
-                          </Badge>
+                          <div className="text-right">
+                            <Badge className={`text-[8px] font-black tracking-widest px-2 py-0.5 rounded-full border-none shadow-none uppercase ${u.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                              {u.status || 'active'}
+                            </Badge>
+                            <p className="text-[8px] text-slate-300 font-bold mt-1 uppercase tracking-tighter">Ref: {u.referralCount || 0} Reg | ₹{u.referralDepositAmount || 0} Dep</p>
+                          </div>
                         </div>
                         
                         <div className="flex items-center justify-between pt-4 border-t border-slate-50">

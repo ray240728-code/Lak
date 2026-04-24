@@ -57,7 +57,11 @@ export default function HistoryPage({ title, type, onBack, user }: HistoryPagePr
     }
   }, [type, user]);
 
-  const formatDate = (timestamp: number) => {
+  const formatDate = (timestamp: any) => {
+    if (!timestamp) return new Date().toLocaleString();
+    if (typeof timestamp.toDate === 'function') {
+      return timestamp.toDate().toLocaleString();
+    }
     return new Date(timestamp).toLocaleString();
   };
 
@@ -108,7 +112,7 @@ export default function HistoryPage({ title, type, onBack, user }: HistoryPagePr
                     {type === 'bet' ? `WinGo ${item.roundId.slice(-4)}` : item.description || item.type}
                   </p>
                   <p className="text-[10px] text-gray-400">
-                    {formatDate(item.timestamp || Date.now())}
+                    {formatDate(item.createdAt || item.timestamp)}
                   </p>
                   {item.orderNumber && (
                     <p className="text-[9px] text-red-400 font-bold uppercase tracking-tighter">
@@ -121,11 +125,11 @@ export default function HistoryPage({ title, type, onBack, user }: HistoryPagePr
                 </div>
                 <div className="text-right">
                   <p className={`text-sm font-bold ${
-                    item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' 
+                    item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' || item.type === 'referral'
                       ? 'text-green-500' 
-                      : 'text-red-500'
+                      : item.status === 'pending' ? 'text-gray-400' : 'text-red-500'
                   }`}>
-                    {item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' ? '+' : '-'}
+                    {item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' || item.type === 'referral' ? '+' : '-'}
                     ₹{item.amount.toFixed(2)}
                   </p>
                   <p className={`text-[10px] ${
