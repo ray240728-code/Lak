@@ -375,12 +375,30 @@ export default function App() {
         (async () => {
           try {
             const usersRef = collection(db, 'users');
-            const q = query(usersRef, where('id', '==', inviteCode));
-            const qPhone = query(usersRef, where('phone', '==', inviteCode));
-            const [qSnap, qSnapPhone] = await Promise.all([getDocs(q), getDocs(qPhone)]);
-            const referrerDoc = qSnap.docs[0] || qSnapPhone.docs[0];
+            let referrerDoc = null;
+
+            // 1. Try to get by UID directly first (fastest)
+            const docRef = doc(db, 'users', inviteCode);
+            const docSnap = await getDoc(docRef);
+            
+            if (docSnap.exists()) {
+              referrerDoc = docSnap;
+            } else {
+              // 2. Try to search by phone if UID lookup failed
+              const qPhone = query(usersRef, where('phone', '==', inviteCode));
+              const qSnapPhone = await getDocs(qPhone);
+              if (!qSnapPhone.empty) {
+                referrerDoc = qSnapPhone.docs[0];
+              }
+            }
+
             if (referrerDoc) {
-              await updateDoc(doc(db, 'users', referrerDoc.id), { referralCount: increment(1) });
+              console.log(`Referrer found: ${referrerDoc.id}, incrementing count`);
+              await updateDoc(doc(db, 'users', referrerDoc.id), { 
+                referralCount: increment(1) 
+              });
+            } else {
+              console.warn(`Referrer not found for code: ${inviteCode}`);
             }
           } catch (refError) {
             console.error("Referral update failed (non-critical):", refError);

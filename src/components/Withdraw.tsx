@@ -158,7 +158,7 @@ export default function Withdraw({ onBack, user }: WithdrawProps) {
               <Button 
                 key={val}
                 variant="outline"
-                className={`h-10 border-blue-500/30 text-blue-100 rounded-xl ${amount === val.toString() ? 'bg-blue-500 border-blue-400 text-white' : 'bg-blue-900/20'}`}
+                className={`h-10 border-gray-100 text-gray-600 rounded-xl transition-colors ${amount === val.toString() ? 'bg-red-500 border-red-400 text-white shadow-md' : 'bg-white hover:bg-gray-50'}`}
                 onClick={() => setAmount(val.toString())}
               >
                 ₹{val}
@@ -257,10 +257,15 @@ export default function Withdraw({ onBack, user }: WithdrawProps) {
         </div>
 
         <Button 
-          className="w-full h-14 bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] hover:opacity-90 text-white font-bold text-lg rounded-2xl shadow-lg shadow-red-100"
+          className="w-full h-14 bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] hover:opacity-90 text-white font-bold text-lg rounded-2xl shadow-lg shadow-red-100 disabled:opacity-50"
           onClick={handleSubmit}
+          disabled={isSubmitting}
         >
-          Withdraw Now
+          {isSubmitting ? (
+            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin mx-auto" />
+          ) : (
+            'Withdraw Now'
+          )}
         </Button>
       </div>
     </div>

@@ -125,12 +125,12 @@ export default function HistoryPage({ title, type, onBack, user }: HistoryPagePr
                 </div>
                 <div className="text-right">
                   <p className={`text-sm font-bold ${
-                    item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' || item.type === 'referral'
+                    item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' || item.type === 'referral' || type === 'deposit'
                       ? 'text-green-500' 
                       : item.status === 'pending' ? 'text-gray-400' : 'text-red-500'
                   }`}>
-                    {item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' || item.type === 'referral' ? '+' : '-'}
-                    ₹{item.amount.toFixed(2)}
+                    {item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' || item.type === 'referral' || type === 'deposit' ? '+' : '-'}
+                    ₹{(parseFloat(item.amount) || 0).toFixed(2)}
                   </p>
                   <p className={`text-[10px] ${
                     item.status === 'completed' || item.status === 'approved' || item.status === 'win' || item.status === 'loss'

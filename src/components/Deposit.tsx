@@ -247,10 +247,15 @@ export default function Deposit({ onBack, user }: DepositProps) {
                 maxLength={12}
               />
               <Button 
-                className="w-full h-12 bg-green-500 hover:bg-green-600 text-white font-bold rounded-xl shadow-lg shadow-green-100"
+                className="w-full h-12 bg-green-500 hover:bg-green-600 text-white font-bold rounded-xl shadow-lg shadow-green-100 disabled:opacity-50"
                 onClick={handleSubmit}
+                disabled={isSubmitting || !utr}
               >
-                Submit Payment
+                {isSubmitting ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mx-auto" />
+                ) : (
+                  'Submit Payment'
+                )}
               </Button>
             </Card>
           </motion.div>

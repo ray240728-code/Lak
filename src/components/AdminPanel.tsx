@@ -356,16 +356,31 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
     }
   };
 
+  const [isProcessing, setIsProcessing] = useState<string | null>(null);
+
   const handleApproveDeposit = async (id: string) => {
+    if (isProcessing) return;
     const request = deposits.find(d => d.id === id);
-    if (!request) return;
+    if (!request || request.status !== 'pending') return;
+    
+    setIsProcessing(id);
     try {
       const userRef = doc(db, 'users', request.userId);
       const userSnap = await getDoc(userRef);
       if (!userSnap.exists()) {
         toast.error('User not found');
+        setIsProcessing(null);
         return;
       }
+
+      // Final safety check: re-fetch deposit to ensure it's still pending
+      const depSnap = await getDoc(doc(db, 'deposits', id));
+      if (!depSnap.exists() || depSnap.data().status !== 'pending') {
+        toast.error('Deposit already processed');
+        setIsProcessing(null);
+        return;
+      }
+
       const userData = userSnap.data() as User;
       const isFirstDeposit = !userData.totalDeposit || userData.totalDeposit === 0;
 
@@ -413,7 +428,6 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
               createdAt: Date.now(),
               description: `Referral bonus from ${userData.phone || userData.name}'s first deposit`
             });
-            console.log(`Credited referral bonus of ₹${bonusAmount} to user ${referrerDoc.id}`);
           }
         }
       }
@@ -423,30 +437,46 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
     } catch (error) {
       console.error("Deposit approval error:", error);
       handleFirestoreError(error, OperationType.UPDATE, 'deposits');
+    } finally {
+      setIsProcessing(null);
     }
   };
 
   const handleRejectDeposit = async (id: string) => {
+    if (isProcessing) return;
+    setIsProcessing(id);
     try {
       await updateDoc(doc(db, 'deposits', id), { status: 'failed' });
       toast.error('Deposit rejected');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'deposits');
+    } finally {
+      setIsProcessing(null);
     }
   };
 
   const handleApproveWithdrawal = async (id: string) => {
+    if (isProcessing) return;
+    const request = withdrawals.find(w => w.id === id);
+    if (!request || request.status !== 'pending') return;
+    
+    setIsProcessing(id);
     try {
       await updateDoc(doc(db, 'withdrawals', id), { status: 'completed' });
       toast.success('Withdrawal approved!');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'withdrawals');
+    } finally {
+      setIsProcessing(null);
     }
   };
 
   const handleRejectWithdrawal = async (id: string) => {
+    if (isProcessing) return;
     const request = withdrawals.find(w => w.id === id);
-    if (!request) return;
+    if (!request || request.status !== 'pending') return;
+    
+    setIsProcessing(id);
     try {
       const userRef = doc(db, 'users', request.userId);
       await updateDoc(userRef, { balance: increment(request.amount) });
@@ -454,6 +484,8 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
       toast.error('Withdrawal rejected and balance refunded!');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'withdrawals');
+    } finally {
+      setIsProcessing(null);
     }
   };
 
@@ -761,8 +793,24 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
                             </div>
                           </div>
                           <div className="flex gap-3 pt-4 border-t border-slate-50">
-                            <Button className="flex-1 h-11 bg-emerald-600 hover:bg-emerald-700 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 transition-all active:scale-95" onClick={() => handleApproveDeposit(d.id)}>Grant Credit</Button>
-                            <Button className="flex-1 h-11 bg-slate-50 text-slate-600 hover:bg-red-50 hover:text-red-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all" onClick={() => handleRejectDeposit(d.id)}>Decline</Button>
+                            <Button 
+                              className="flex-1 h-11 bg-emerald-600 hover:bg-emerald-700 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 transition-all active:scale-95 disabled:opacity-50" 
+                              onClick={() => handleApproveDeposit(d.id)}
+                              disabled={!!isProcessing}
+                            >
+                              {isProcessing === d.id ? (
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mx-auto" />
+                              ) : (
+                                'Grant Credit'
+                              )}
+                            </Button>
+                            <Button 
+                              className="flex-1 h-11 bg-slate-50 text-slate-600 hover:bg-red-50 hover:text-red-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-50" 
+                              onClick={() => handleRejectDeposit(d.id)}
+                              disabled={!!isProcessing}
+                            >
+                              Decline
+                            </Button>
                           </div>
                         </div>
                       </Card>
@@ -810,8 +858,24 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
                             </div>
                           </div>
                           <div className="flex gap-3 pt-4 border-t border-slate-50">
-                            <Button className="flex-1 h-11 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-slate-200 transition-all active:scale-95" onClick={() => handleApproveWithdrawal(w.id)}>Release Funds</Button>
-                            <Button className="flex-1 h-11 bg-slate-50 text-slate-600 hover:bg-red-50 hover:text-red-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all" onClick={() => handleRejectWithdrawal(w.id)}>Decline</Button>
+                            <Button 
+                              className="flex-1 h-11 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-slate-200 transition-all active:scale-95 disabled:opacity-50" 
+                              onClick={() => handleApproveWithdrawal(w.id)}
+                              disabled={!!isProcessing}
+                            >
+                              {isProcessing === w.id ? (
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mx-auto" />
+                              ) : (
+                                'Release Funds'
+                              )}
+                            </Button>
+                            <Button 
+                              className="flex-1 h-11 bg-slate-50 text-slate-600 hover:bg-red-50 hover:text-red-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-50" 
+                              onClick={() => handleRejectWithdrawal(w.id)}
+                              disabled={!!isProcessing}
+                            >
+                              Decline
+                            </Button>
                           </div>
                         </div>
                       </Card>
