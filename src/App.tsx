@@ -108,6 +108,11 @@ export default function App() {
     }
   };
 
+  const currentPageRef = useRef<Page>(currentPage);
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
   useEffect(() => {
     let unsubscribeUser: (() => void) | null = null;
 
@@ -126,12 +131,12 @@ export default function App() {
             setUser(userData);
             
             // Auto-navigate from login/register if user is found, but only if we're not manually handling it
-            if (!isAuthActionInProgress.current && (currentPage === 'login' || currentPage === 'register')) {
+            if (!isAuthActionInProgress.current && (currentPageRef.current === 'login' || currentPageRef.current === 'register')) {
               setCurrentPage('home');
             }
           } else {
             // Document doesn't exist yet
-            if (!isAuthActionInProgress.current) {
+            if (!isAuthActionInProgress.current && currentPageRef.current !== 'register') {
               setUser(null);
               setCurrentPage('login');
             }
@@ -139,7 +144,7 @@ export default function App() {
           setLoading(false);
         }, (err) => {
           console.error("User listener error:", err);
-          if (!isAuthActionInProgress.current) {
+          if (!isAuthActionInProgress.current && currentPageRef.current !== 'register') {
             setUser(null);
             setCurrentPage('login');
           }
@@ -147,7 +152,7 @@ export default function App() {
         });
       } else {
         setUser(null);
-        if (!isAuthActionInProgress.current) {
+        if (!isAuthActionInProgress.current && currentPageRef.current !== 'register') {
           setCurrentPage('login');
         }
         setLoading(false);
@@ -158,19 +163,23 @@ export default function App() {
       unsubscribeAuth();
       if (unsubscribeUser) unsubscribeUser();
     };
-  }, [currentPage]); // Re-run if currentPage changes to handle auto-navigation correctly
+  }, []); // Run once on mount
 
   const navigate = (page: any) => setCurrentPage(page);
 
-  const handleLogin = async (phone: string, password?: string) => {
-    if (!password) return;
+  const handleLogin = async (phoneInput: string, passwordInput?: string) => {
+    if (!passwordInput) return;
+    const phone = phoneInput.trim().replace(/\s+/g, '');
+    const password = passwordInput.trim();
     isAuthActionInProgress.current = true;
     setLoading(true);
+    console.log(`Attempting login for: ${phone}`);
     try {
       // 1. Attempt Firebase Auth login FIRST
       const email = `${phone}@lakshmi.club`;
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const uid = userCredential.user.uid;
+      console.log(`Auth successful, UID: ${uid}`);
       
       // 2. Once logged in, we have permissions to read the user doc
       let userDoc;
@@ -200,7 +209,8 @@ export default function App() {
           console.log("Found existing document with different ID, migrating to UID...");
           // Migrate to new UID
           try {
-            await setDoc(doc(db, 'users', uid), { ...userData, id: uid });
+            const { password: _, ...dataToMigrate } = userData as any;
+            await setDoc(doc(db, 'users', uid), { ...dataToMigrate, id: uid });
             // Delete old document
             await deleteDoc(doc(db, 'users', oldDoc.id));
             // Re-fetch the new document
@@ -213,6 +223,7 @@ export default function App() {
 
       if (userDoc?.exists()) {
         let userData = userDoc.data() as User;
+        console.log("User document found:", userData.role);
         
         // Force admin role for the specific admin user
         if (userData.phone === '9999999999' || userCredential.user.email === 'purnundurayr@gmail.com') {
@@ -224,34 +235,50 @@ export default function App() {
         
         if (userData.status === 'blocked') {
           await signOut(auth);
-          toast.error('Your account has been blocked. Contact support.');
+          toast.error('Your account has been blocked. Contact customer support.');
           setLoading(false);
           isAuthActionInProgress.current = false;
           return;
         }
         setUser(userData);
-        toast.success('Login successful!');
-        navigate('home');
+        toast.success(`Welcome back, ${userData.name}!`);
+        setCurrentPage('home');
       } else {
-        toast.error('User data not found. Please register.');
+        console.error("Critical: Auth succeeded but doc doesn't exist even after migration attempt");
+        toast.error('Login partial success: Auth verified but profile missing.', {
+          description: 'Try registering with the SAME phone and password to restore your profile.'
+        });
         await signOut(auth);
       }
     } catch (error: any) {
       console.error("Login Error Details:", error);
-      const errorCode = error.code;
-      const errorMessage = error.message;
       
+      let displayMessage = 'Login failed. Please try again.';
+      try {
+        if (error.message && typeof error.message === 'string' && error.message.startsWith('{')) {
+          const errInfo = JSON.parse(error.message);
+          displayMessage = errInfo.error;
+        } else {
+          displayMessage = error.message;
+        }
+      } catch (e) {
+        displayMessage = error.message;
+      }
+
+      const errorCode = error.code;
       if (errorCode === 'auth/invalid-credential' || 
           errorCode === 'auth/user-not-found' || 
           errorCode === 'auth/wrong-password' ||
           errorCode === 'auth/invalid-login-credentials') {
-        toast.error('Incorrect phone number or password.', {
-          description: 'Please make sure you are using the same password you registered with.'
+        toast.error('Invalid phone number or password.', {
+          description: 'Please check your credentials. If you are already registered, make sure you are using the correct 10-digit number and 6+ character password.'
         });
       } else if (errorCode === 'auth/too-many-requests') {
-        toast.error('Too many failed attempts. Please try again later.');
+        toast.error('Too many failed attempts. Account temporarily locked for security. Please try again in 15 minutes.');
+      } else if (errorCode === 'auth/network-request-failed') {
+        toast.error('Network error. Please check your internet connection.');
       } else {
-        toast.error(`Login failed: ${errorMessage}`);
+        toast.error(displayMessage && displayMessage.length > 100 ? 'Login failed. Please contact support.' : (displayMessage || 'Login failed.'));
       }
     } finally {
       setLoading(false);
@@ -259,10 +286,14 @@ export default function App() {
     }
   };
 
-  const handleRegister = async (phone: string, password?: string, inviteCode?: string) => {
-    if (!password) return;
+  const handleRegister = async (phoneInput: string, passwordInput?: string, inviteCodeInput?: string) => {
+    if (!passwordInput) return;
+    const phone = phoneInput.trim().replace(/\s+/g, '');
+    const password = passwordInput.trim();
+    const inviteCode = (inviteCodeInput || '').trim();
     isAuthActionInProgress.current = true;
     setLoading(true);
+    console.log(`Attempting registration for: ${phone}`);
     try {
       // 1. Check if Auth account exists by attempting to create it
       const email = `${phone}@lakshmi.club`;
@@ -271,8 +302,9 @@ export default function App() {
         userCredential = await createUserWithEmailAndPassword(auth, email, password);
       } catch (authError: any) {
         if (authError.code === 'auth/email-already-in-use') {
+          console.log("Auth account already exists, redirecting to login");
           toast.error('This phone number is already registered. Please Login.');
-          navigate('login');
+          setCurrentPage('login');
           setLoading(false);
           isAuthActionInProgress.current = false;
           return;
@@ -281,6 +313,7 @@ export default function App() {
       }
 
       const uid = userCredential.user.uid;
+      console.log(`Auth account created, UID: ${uid}`);
 
       // 2. Check if a Firestore document already exists for this phone
       const usersRef = collection(db, 'users');
@@ -292,6 +325,8 @@ export default function App() {
         handleFirestoreError(err, OperationType.LIST, 'users');
       }
 
+      // 3. Handle data creation or migration
+      let userData: User;
       if (querySnapshot && !querySnapshot.empty) {
         // Migration case: Auth account was just created, but Firestore doc already existed with different ID
         const oldDoc = querySnapshot.docs[0];
@@ -299,87 +334,90 @@ export default function App() {
         
         console.log("Found existing Firestore doc during registration, migrating to new UID...");
         try {
-          await setDoc(doc(db, 'users', uid), { ...existingData, id: uid, password }); // Update password too
+          const { password: _, ...dataToMigrate } = existingData as any;
+          userData = { ...dataToMigrate, id: uid };
+          await setDoc(doc(db, 'users', uid), userData);
           await deleteDoc(doc(db, 'users', oldDoc.id));
         } catch (err) {
           handleFirestoreError(err, OperationType.WRITE, `users/${uid}`);
+          throw err; // Ensure we stop if migration fails
         }
       } else {
         // Normal case: New user
-        const newUser: User = {
+        console.log("Creating new firestore document...");
+        userData = {
           id: uid,
           phone,
-          password,
           name: `Member${Math.floor(10000 + Math.random() * 90000)}`,
           balance: 0,
           status: 'active',
           totalDeposit: 0,
           role: phone === '9999999999' ? 'admin' : 'user',
-          referredBy: inviteCode || undefined,
+          referredBy: inviteCode || null,
           referralCount: 0,
           createdAt: Date.now()
         };
         try {
-          await setDoc(doc(db, 'users', uid), newUser);
+          await setDoc(doc(db, 'users', uid), userData);
         } catch (err) {
           handleFirestoreError(err, OperationType.CREATE, `users/${uid}`);
+          throw err;
         }
       }
 
-      // Handle referral logic
+      // Handle referral logic asynchronously
       if (inviteCode) {
-        try {
-          // Find referrer by ID or Phone
-          const usersRef = collection(db, 'users');
-          const q = query(usersRef, where('id', '==', inviteCode));
-          const qPhone = query(usersRef, where('phone', '==', inviteCode));
-          
-          const [qSnap, qSnapPhone] = await Promise.all([
-            getDocs(q),
-            getDocs(qPhone)
-          ]);
-
-          const referrerDoc = qSnap.docs[0] || qSnapPhone.docs[0];
-          if (referrerDoc) {
-            await updateDoc(doc(db, 'users', referrerDoc.id), {
-              referralCount: increment(1)
-            });
+        console.log(`Processing referral: ${inviteCode}`);
+        (async () => {
+          try {
+            const usersRef = collection(db, 'users');
+            const q = query(usersRef, where('id', '==', inviteCode));
+            const qPhone = query(usersRef, where('phone', '==', inviteCode));
+            const [qSnap, qSnapPhone] = await Promise.all([getDocs(q), getDocs(qPhone)]);
+            const referrerDoc = qSnap.docs[0] || qSnapPhone.docs[0];
+            if (referrerDoc) {
+              await updateDoc(doc(db, 'users', referrerDoc.id), { referralCount: increment(1) });
+            }
+          } catch (refError) {
+            console.error("Referral update failed (non-critical):", refError);
           }
-        } catch (refError) {
-          console.error("Referral update error:", refError);
-          // Don't block registration if referral update fails
-        }
+        })();
       }
 
-      // Fetch the final user data to ensure state is correct
-      let finalUserDoc;
-      try {
-        finalUserDoc = await getDoc(doc(db, 'users', uid));
-      } catch (err) {
-        handleFirestoreError(err, OperationType.GET, `users/${uid}`);
-      }
-
-      if (finalUserDoc?.exists()) {
-        setUser(finalUserDoc.data() as User);
-        toast.success('Registration successful!');
-        navigate('home');
-      } else {
-        toast.success('Registration successful! Please login.');
-        navigate('login');
-      }
+      // Success! Set state and move to home
+      setUser(userData);
+      toast.success('Registration successful! Welcome to Lakshmi Club.');
+      setCurrentPage('home');
     } catch (error: any) {
+      console.error("Registration Critical Error:", error);
+      
+      let displayMessage = 'Registration failed. Please try again.';
+      
+      // Attempt to parse JSON error if it came from handleFirestoreError
+      try {
+        if (error.message && typeof error.message === 'string' && error.message.startsWith('{')) {
+          const errInfo = JSON.parse(error.message);
+          displayMessage = errInfo.error;
+        } else {
+          displayMessage = error.message;
+        }
+      } catch (e) {
+        displayMessage = error.message;
+      }
+
       const errorCode = error.code;
-      if (errorCode === 'auth/email-already-in-use') {
-        toast.error('Account already exists. Please Login.');
-        navigate('login');
+      if (errorCode === 'auth/email-already-in-use' || displayMessage?.includes('already registered')) {
+        toast.error('This phone number is already registered. Please Login.');
+        setCurrentPage('login');
       } else if (errorCode === 'auth/weak-password') {
         toast.error('Password is too weak. Please use at least 6 characters.');
       } else if (errorCode === 'auth/invalid-email') {
         toast.error('Invalid phone format.');
+      } else if (errorCode === 'auth/network-request-failed') {
+        toast.error('Network error. Please check your internet connection.');
       } else {
-        toast.error(`Registration failed: ${error.message || 'Please try again.'}`);
+        toast.error(displayMessage && displayMessage.length > 100 ? 'Registration failed. Please contact support.' : (displayMessage || 'Registration failed.'));
       }
-      console.error(error);
     } finally {
       setLoading(false);
       isAuthActionInProgress.current = false;

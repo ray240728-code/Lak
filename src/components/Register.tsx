@@ -17,6 +17,8 @@ export default function Register({ onNavigate, onRegister, loading }: RegisterPr
   const [inviteCode, setInviteCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
+  const [agreed, setAgreed] = useState(false);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const invite = params.get('invite') || params.get('inv');
@@ -26,14 +28,18 @@ export default function Register({ onNavigate, onRegister, loading }: RegisterPr
   }, []);
 
   const handleRegister = () => {
-    const trimmedPhone = phone.trim();
+    const trimmedPhone = phone.trim().replace(/\s+/g, '');
     const trimmedPassword = password.trim();
     if (!trimmedPhone || trimmedPhone.length < 10) {
-      toast.error('Please enter a valid phone number');
+      toast.error('Please enter a valid 10-digit phone number');
       return;
     }
     if (!trimmedPassword || trimmedPassword.length < 6) {
-      toast.error('Password must be at least 6 characters (Firebase requirement)');
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+    if (!agreed) {
+      toast.error('Please read and agree to the Privacy Agreement');
       return;
     }
     onRegister(trimmedPhone, trimmedPassword, inviteCode.trim());
@@ -114,15 +120,22 @@ export default function Register({ onNavigate, onRegister, loading }: RegisterPr
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            <Checkbox id="agree" className="border-white/50 data-[state=checked]:bg-white data-[state=checked]:text-red-600" />
-            <label htmlFor="agree" className="text-xs text-red-100">I have read and agree <span className="text-white font-bold underline">【Privacy Agreement】</span></label>
+          <div className="flex items-center gap-3 py-2">
+            <Checkbox 
+              id="agree" 
+              checked={agreed}
+              onCheckedChange={(checked) => setAgreed(!!checked)}
+              className="w-5 h-5 border-white/50 data-[state=checked]:bg-white data-[state=checked]:text-red-600" 
+            />
+            <label htmlFor="agree" className="text-xs text-red-100 leading-relaxed cursor-pointer select-none">
+              I have read and agree <span className="text-white font-bold underline">【Privacy Agreement】</span>
+            </label>
           </div>
         </div>
 
         <div className="space-y-4">
           <Button 
-            className="w-full h-12 bg-white text-red-600 hover:bg-gray-100 font-bold text-lg rounded-full shadow-lg"
+            className="w-full h-14 bg-white text-red-600 hover:bg-red-50 hover:scale-[1.01] active:scale-[0.99] font-black uppercase tracking-[0.2em] text-sm rounded-2xl shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleRegister}
             disabled={loading}
           >

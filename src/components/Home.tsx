@@ -82,17 +82,10 @@ export default function Home({ onNavigate, user }: HomeProps) {
     // Real-time Winning List
     const betsRef = collection(db, 'bets');
     const qWins = query(betsRef, where('status', '==', 'win'), orderBy('timestamp', 'desc'), limit(10));
-    const unsubscribeWins = onSnapshot(qWins, async (snapshot) => {
-      const wins = await Promise.all(snapshot.docs.map(async (betDoc) => {
+    const unsubscribeWins = onSnapshot(qWins, (snapshot) => {
+      const wins = snapshot.docs.map((betDoc) => {
         const data = betDoc.data();
-        let userName = 'Mem***' + data.userId.slice(-2);
-        try {
-          const userSnap = await getDoc(doc(db, 'users', data.userId));
-          if (userSnap.exists()) {
-            const userData = userSnap.data();
-            userName = (userData.name || 'Member').slice(0, 3) + '***' + (userData.phone || '').slice(-2);
-          }
-        } catch (e) { /* ignore */ }
+        const userName = 'Mem***' + data.userId.slice(-4);
         
         return {
           id: betDoc.id,
@@ -100,7 +93,7 @@ export default function Home({ onNavigate, user }: HomeProps) {
           amount: `₹${(data.payout || 0).toFixed(2)}`,
           game: data.mode === '1min' ? 'Win Go' : `Win Go ${data.mode}`
         };
-      }));
+      });
       setRealWins(wins);
     });
 

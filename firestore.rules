@@ -3,7 +3,14 @@ service cloud.firestore {
   match /databases/{database}/documents {
     
     // ===============================================================
-    // Helper Functions
+    // 0. Global Safety Net
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // Phase 3: Primitive Definitions (Helper Functions)
     // ===============================================================
     
     function isAuthenticated() {
@@ -14,19 +21,43 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
+    // Identity integrity check for document creation
+    function isAuthBound(data) {
+      return data.userId == request.auth.uid;
+    }
+
     function isAdmin() {
       return isAuthenticated() && 
         (request.auth.token.email == "purnundurayr@gmail.com" ||
-         request.auth.token.email == "9999999999@lakshmi.club" ||
-         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+         request.auth.token.email == "9999999999@lakshmi.club");
     }
+
+    // Helper for string validation
+    function isValidString(val, max) {
+      return val is string && val.size() <= max;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // ===============================================================
+    // Validation Blueprints (Anti-Update-Gap)
+    // ===============================================================
 
     function isValidUser(data) {
       let requiredFields = ['id', 'phone', 'name', 'balance', 'status', 'role', 'createdAt', 'totalDeposit', 'referralCount'];
       return data.keys().hasAll(requiredFields) &&
-             data.phone is string &&
-             data.name is string && data.name.size() > 0 &&
+             isValidString(data.phone, 20) &&
+             isValidString(data.name, 50) && data.name.size() > 0 &&
              data.balance is number &&
              data.totalDeposit is number &&
              data.referralCount is number &&
@@ -34,21 +65,71 @@ service cloud.firestore {
              data.status in ['active', 'blocked'];
     }
 
+    function isValidBet(data) {
+      let requiredFields = ['userId', 'roundId', 'mode', 'amount', 'selection', 'status', 'timestamp'];
+      return data.keys().hasAll(requiredFields) &&
+             data.userId == request.auth.uid &&
+             isValidString(data.roundId, 50) &&
+             data.mode in ['1min', '3min', '5min', '10min'] &&
+             data.amount is number && data.amount > 0 &&
+             data.status in ['pending', 'win', 'loss'];
+    }
+
+    function isValidGameHistory(data) {
+      let requiredFields = ['id', 'mode', 'resultColor', 'resultNumber', 'resultBigSmall', 'status'];
+      return data.keys().hasAll(requiredFields) &&
+             data.resultNumber is number &&
+             data.resultBigSmall in ['big', 'small'] &&
+             data.status == 'completed';
+    }
+
     // ===============================================================
-    // Rules
+    // Resources
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
-                    (isOwner(userId) || isAdmin());
-      allow update: if isAuthenticated() && 
-                    (
-                      isAdmin() ||
-                      (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role && request.resource.data.balance == resource.data.balance) ||
-                      (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['referralCount']) && 
-                       request.resource.data.referralCount == resource.data.referralCount + 1)
-                    );
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin(); // Only admins can list all users
+      
+      // Personalized query check for self-listing by phone (used in login/check)
+      allow list: if isAuthenticated() && resource.data.phone + "@lakshmi.club" == request.auth.token.email;
+
+      allow create: if isAuthenticated() && isValidUser(incoming()) && isOwner(userId);
+      
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (isOwner(userId) && 
+         incoming().role == existing().role && 
+         incoming().status == existing().status &&
+         (incoming().diff(existing()).affectedKeys().hasOnly(['balance', 'totalDeposit', 'referralCount', 'name'])))
+      );
+    }
+
+    match /bets/{betId} {
+      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin() || resource.data.status == 'win');
+      
+      allow create: if isAuthenticated() && isValidBet(incoming());
+      
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        // User updating their own bet result (only allowed if status is terminal and matches calculation)
+        (resource.data.userId == request.auth.uid && 
+         existing().status == 'pending' && 
+         incoming().status in ['win', 'loss'] &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'payout', 'result']))
+      );
+    }
+
+    match /game_history/{roundId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidGameHistory(incoming());
+      allow update: if isAdmin();
+    }
+
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /banners/{bannerId} {
@@ -61,37 +142,22 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    match /config/{docId} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /bets/{betId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
-    }
-
     match /deposits/{depositId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && incoming().userId == request.auth.uid;
       allow update: if isAdmin();
     }
 
     match /withdrawals/{withdrawalId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && incoming().userId == request.auth.uid;
       allow update: if isAdmin();
     }
-    
+
     match /giftcards/{cardId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
-    }
-
-    match /game_history/{roundId} {
-      allow read: if true;
       allow write: if isAdmin();
     }
 

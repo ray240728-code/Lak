@@ -18,7 +18,7 @@ export default function Login({ onNavigate, onLogin, onGoogleLogin, loading }: L
   const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = () => {
-    const trimmedPhone = phone.trim();
+    const trimmedPhone = phone.trim().replace(/\s+/g, '');
     const trimmedPassword = password.trim();
     if (!trimmedPhone) {
       toast.error('Please enter your phone number');

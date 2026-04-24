@@ -122,7 +122,7 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
     };
 
     try {
-      const q = query(collection(db, 'bets'), where('roundId', '==', roundId), where('status', '==', 'pending'));
+      const q = query(collection(db, 'bets'), where('roundId', '==', roundId), where('status', '==', 'pending'), where('userId', '==', user.id));
       const querySnapshot = await getDocs(q);
       if (querySnapshot.empty) {
         // Even if no bets, we still want to record the game history once
@@ -137,16 +137,27 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
       await runTransaction(db, async (transaction) => {
         const historyRef = doc(db, 'game_history', roundId);
         const historySnap = await transaction.get(historyRef);
+        
+        const userRef = doc(db, 'users', user.id);
+        const userSnap = await transaction.get(userRef);
+
+        // Fetch all bet snapshots first
+        const betSnapshots = [];
+        for (const betDoc of querySnapshot.docs) {
+          const betRef = doc(db, 'bets', betDoc.id);
+          const freshBetSnap = await transaction.get(betRef);
+          if (freshBetSnap.exists() && freshBetSnap.data()?.status === 'pending') {
+            betSnapshots.push({ ref: betRef, snap: freshBetSnap });
+          }
+        }
+
+        // NOW PERFORM ALL WRITES
         if (!historySnap.exists()) {
           transaction.set(historyRef, newRound);
         }
 
-        for (const betDoc of querySnapshot.docs) {
-          const betRef = doc(db, 'bets', betDoc.id);
-          // CRITICAL: Must re-read status inside transaction to prevent double payouts
-          const freshBetSnap = await transaction.get(betRef);
-          if (!freshBetSnap.exists() || freshBetSnap.data()?.status !== 'pending') continue;
-
+        let totalWinPayout = 0;
+        for (const { ref: betRef, snap: freshBetSnap } of betSnapshots) {
           const betData = freshBetSnap.data() as Bet;
           const payout = calculatePayout(betData, result);
           const status = payout > 0 ? 'win' : 'loss';
@@ -162,23 +173,14 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
           });
 
           if (payout > 0) {
-            const userRef = doc(db, 'users', betData.userId);
-            transaction.update(userRef, { balance: increment(payout) });
-            if (betData.userId === user.id) {
-              setLastResult({
-                status: 'win',
-                amount: payout,
-                roundId: roundId,
-                number: result.number,
-                color: result.color,
-                bigSmall: result.bigSmall
-              });
-              setShowResultPopup(true);
-            }
-          } else if (betData.userId === user.id) {
+            totalWinPayout += payout;
+          }
+
+          // Local state updates for UI feedback (outside transaction logic but within closure)
+          if (betData.userId === user.id) {
             setLastResult({
-              status: 'loss',
-              amount: betData.amount,
+              status: payout > 0 ? 'win' : 'loss',
+              amount: payout > 0 ? payout : betData.amount,
               roundId: roundId,
               number: result.number,
               color: result.color,
@@ -186,6 +188,10 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
             });
             setShowResultPopup(true);
           }
+        }
+
+        if (totalWinPayout > 0 && userSnap.exists()) {
+          transaction.update(userRef, { balance: increment(totalWinPayout) });
         }
       });
     } catch (error) {
