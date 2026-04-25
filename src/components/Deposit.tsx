@@ -81,19 +81,25 @@ export default function Deposit({ onBack, user }: DepositProps) {
 
   const isSubmittingRef = useRef(false);
   const handleSubmit = async () => {
-    if (!utr || utr.length < 12) {
+    const cleanUtr = utr.trim();
+    if (!cleanUtr || cleanUtr.length < 12) {
       toast.error('Please enter a valid 12-digit UTR number');
       return;
     }
 
-    if (isSubmittingRef.current || isSubmitting) return;
+    if (isSubmittingRef.current || isSubmitting) {
+      console.log('Submission already in progress');
+      return;
+    }
 
-    isSubmittingRef.current = true;
     setIsSubmitting(true);
+    isSubmittingRef.current = true;
+    
     try {
-      // Check for duplicate UTR before submitting
+      console.log('Checking for duplicate UTR:', cleanUtr);
+      // Check for duplicate UTR before submitting (constrained to current user by security rules)
       const depositsRef = collection(db, 'deposits');
-      const q = query(depositsRef, where('utr', '==', utr));
+      const q = query(depositsRef, where('userId', '==', user.id), where('utr', '==', cleanUtr));
       const qSnap = await getDocs(q);
       
       if (!qSnap.empty) {
@@ -103,13 +109,15 @@ export default function Deposit({ onBack, user }: DepositProps) {
         return;
       }
 
+      console.log('Submitting deposit request...');
       const newRequest = {
         userId: user.id,
         phone: user.phone,
         amount: parseFloat(amount),
-        utr,
+        utr: cleanUtr,
         status: 'pending',
         createdAt: serverTimestamp(),
+        timestamp: Date.now(), // Legacy support
         orderNumber
       };
 
@@ -118,7 +126,13 @@ export default function Deposit({ onBack, user }: DepositProps) {
       toast.success('Deposit request submitted! Admin will verify soon.');
       onBack();
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'deposits');
+      console.error('Deposit submission error:', error);
+      toast.error('Failed to submit deposit. Please try again.');
+      try {
+        handleFirestoreError(error, OperationType.CREATE, 'deposits');
+      } catch (err) {
+        // handleFirestoreError throws, which is fine
+      }
     } finally {
       setIsSubmitting(false);
       isSubmittingRef.current = false;
