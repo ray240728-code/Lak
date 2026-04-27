@@ -164,80 +164,125 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
     };
 
     try {
-      // Find all pending bets for this round and user
+      // 1. Get the authoritative result (check history first, then predictions, then generate)
+      const historyRef = doc(db, 'game_history', roundId);
+      const historySnap = await getDoc(historyRef);
+      
+      let finalResult: any;
+      if (historySnap.exists()) {
+        const hist = historySnap.data();
+        finalResult = {
+          number: hist.resultNumber,
+          color: hist.resultColor,
+          bigSmall: hist.resultBigSmall
+        };
+      } else {
+        finalResult = generateRoundResult(roundId);
+        const predData = predictionConfigs[mode];
+        if (predData) {
+          if (predData.currentRoundId === roundId && predData.currentResult) {
+            finalResult = predData.currentResult;
+          } else if (predData.nextRoundId === roundId && predData.nextResult) {
+            finalResult = predData.nextResult;
+          }
+        }
+      }
+
       const q = query(
         collection(db, 'bets'), 
         where('roundId', '==', roundId), 
-        where('status', '==', 'pending'), 
         where('userId', '==', user.id)
       );
       
       const querySnapshot = await getDocs(q);
       
-      // Even if no bets, record history if missing
       if (querySnapshot.empty) {
-        const historyRef = doc(db, 'game_history', roundId);
-        const historySnap = await getDoc(historyRef);
         if (!historySnap.exists()) {
-          await setDoc(historyRef, newRound);
+          await setDoc(historyRef, {
+            id: roundId,
+            mode,
+            startTime: Date.now() - (mode === '1min' ? 60000 : mode === '3min' ? 180000 : mode === '5min' ? 300000 : 600000),
+            endTime: Date.now(),
+            resultColor: finalResult.color,
+            resultNumber: finalResult.number,
+            resultBigSmall: finalResult.bigSmall,
+            status: 'completed'
+          });
         }
         return;
       }
+
+      // Check for any pending bets that need settlement
+      const pendingBets = querySnapshot.docs.filter(d => d.data().status === 'pending');
       
-      await runTransaction(db, async (transaction) => {
-        const historyRef = doc(db, 'game_history', roundId);
-        const historySnap = await transaction.get(historyRef);
-        
-        const userRef = doc(db, 'users', user.id);
-        const userSnap = await transaction.get(userRef);
+      if (pendingBets.length > 0) {
+        await runTransaction(db, async (transaction) => {
+          const freshHistorySnap = await transaction.get(historyRef);
+          const userRef = doc(db, 'users', user.id);
+          const userSnap = await transaction.get(userRef);
 
-        const betSnapshots = await Promise.all(
-          querySnapshot.docs.map(betDoc => transaction.get(betDoc.ref))
-        );
+          const betSnaps = await Promise.all(pendingBets.map(d => transaction.get(d.ref)));
 
-        if (!historySnap.exists()) {
-          transaction.set(historyRef, newRound);
-        }
-
-        let totalWinPayout = 0;
-
-        for (const betSnap of betSnapshots) {
-          if (!betSnap.exists() || betSnap.data()?.status !== 'pending') continue;
-
-          const betData = betSnap.data() as Bet;
-          const payout = calculatePayout(betData, result);
-          const status = payout > 0 ? 'win' : 'loss';
-          
-          transaction.update(betSnap.ref, {
-            status,
-            payout,
-            result: {
-              number: result.number,
-              color: result.color,
-              bigSmall: result.bigSmall
-            }
-          });
-
-          if (payout > 0) {
-            totalWinPayout += payout;
+          if (!freshHistorySnap.exists()) {
+            transaction.set(historyRef, {
+              id: roundId,
+              mode,
+              startTime: Date.now() - (mode === '1min' ? 60000 : mode === '3min' ? 180000 : mode === '5min' ? 300000 : 600000),
+              endTime: Date.now(),
+              resultColor: finalResult.color,
+              resultNumber: finalResult.number,
+              resultBigSmall: finalResult.bigSmall,
+              status: 'completed'
+            });
           }
 
-          // UI feedback
-          setLastResult({
-            status: payout > 0 ? 'win' : 'loss',
-            amount: payout > 0 ? payout : betData.amount,
-            roundId: roundId,
-            number: result.number,
-            color: result.color,
-            bigSmall: result.bigSmall
-          });
-          setShowResultPopup(true);
-        }
+          let totalPayout = 0;
+          for (const s of betSnaps) {
+            if (!s.exists() || s.data().status !== 'pending') continue;
+            const payout = calculatePayout(s.data() as Bet, finalResult);
+            transaction.update(s.ref, {
+              status: payout > 0 ? 'win' : 'loss',
+              payout,
+              result: finalResult,
+              updatedAt: Date.now()
+            });
+            if (payout > 0) totalPayout += payout;
+          }
 
-        if (totalWinPayout > 0 && userSnap.exists()) {
-          transaction.update(userRef, { balance: increment(totalWinPayout) });
+          if (totalPayout > 0 && userSnap.exists()) {
+            transaction.update(userRef, { balance: increment(totalPayout) });
+          }
+        });
+      }
+
+      // 4. SHOW POPUP (based on all bets for this round)
+      // Re-fetch to get latest status if needed, or just calculate from the snapshot we have
+      let bestStatus: 'win' | 'loss' = 'loss';
+      let bestPayout = 0;
+      let playedAmount = 0;
+
+      for (const d of querySnapshot.docs) {
+        const b = d.data() as Bet;
+        const p = calculatePayout(b, finalResult);
+        playedAmount += b.amount;
+        if (p > 0) {
+          bestStatus = 'win';
+          bestPayout += p;
         }
+      }
+
+      setLastResult({
+        status: bestStatus,
+        amount: bestStatus === 'win' ? bestPayout : playedAmount,
+        roundId: roundId,
+        number: finalResult.number,
+        color: finalResult.color,
+        bigSmall: finalResult.bigSmall
       });
+      
+      // Delay slightly for dramatic effect or to ensure states are settled
+      setTimeout(() => setShowResultPopup(true), 1000);
+
     } catch (error) {
       console.error("Error processing round end:", error);
     }
