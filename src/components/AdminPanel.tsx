@@ -32,7 +32,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { ActivityItem, GiftCard, DepositRequest, WithdrawalRequest, AppSettings, User, GameMode } from '../types';
 import { getRoundId, generateRoundResult } from '../lib/gameLogic';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, onSnapshot, query, orderBy, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, where, getDocs, limit, increment } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, where, getDocs, limit, increment, runTransaction, serverTimestamp } from 'firebase/firestore';
 
 interface AdminPanelProps {
   onNavigate: (page: any) => void;
@@ -365,94 +365,84 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
     
     setIsProcessing(id);
     try {
-      const userRef = doc(db, 'users', request.userId);
-      const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) {
-        toast.error('User not found');
-        setIsProcessing(null);
-        return;
-      }
+      await runTransaction(db, async (transaction) => {
+        const depRef = doc(db, 'deposits', id);
+        const depSnap = await transaction.get(depRef);
+        
+        if (!depSnap.exists()) throw new Error('Deposit request not found');
+        if (depSnap.data().status !== 'pending') throw new Error('Deposit already processed');
 
-      // Final safety check: re-fetch deposit to ensure it's still pending
-      const depSnap = await getDoc(doc(db, 'deposits', id));
-      if (!depSnap.exists() || depSnap.data().status !== 'pending') {
-        toast.error('Deposit already processed');
-        setIsProcessing(null);
-        return;
-      }
+        const userRef = doc(db, 'users', request.userId);
+        const userSnap = await transaction.get(userRef);
+        if (!userSnap.exists()) throw new Error('User not found');
 
-      const userData = userSnap.data() as User;
-      const isFirstDeposit = !userData.totalDeposit || userData.totalDeposit === 0;
+        const userData = userSnap.data() as User;
+        const isFirstDeposit = !userData.totalDeposit || userData.totalDeposit === 0;
 
-      // Update user balance and totalDeposit
-      await updateDoc(userRef, {
-        balance: increment(request.amount),
-        totalDeposit: increment(request.amount)
-      });
+        // 1. Update user balance and totalDeposit
+        transaction.update(userRef, {
+          balance: increment(request.amount),
+          totalDeposit: increment(request.amount)
+        });
 
-      // Add transaction record for users' deposit
-      await addDoc(collection(db, 'transactions'), {
-        userId: request.userId,
-        type: 'deposit',
-        amount: request.amount,
-        status: 'completed',
-        createdAt: Date.now(),
-        description: `Deposit Approved (Order: ${request.orderNumber})`
-      });
+        // 2. Update deposit status to completed
+        transaction.update(depRef, { 
+          status: 'completed',
+          processedAt: serverTimestamp(),
+          processedBy: user.id
+        });
 
-      // Referral Bonus Logic: 30% of first deposit
-      if (isFirstDeposit && userData.referredBy) {
-        const bonusAmount = Math.floor(request.amount * 0.3);
-        if (bonusAmount > 0) {
-          // Find referrer
-          const usersRef = collection(db, 'users');
-          let referrerDoc = null;
+        // 3. Add transaction record
+        const transRef = doc(collection(db, 'transactions'));
+        transaction.set(transRef, {
+          userId: request.userId,
+          type: 'deposit',
+          amount: request.amount,
+          status: 'completed',
+          createdAt: Date.now(),
+          description: `Deposit Approved (Order: ${request.orderNumber})`
+        });
 
-          // 1. Try to get by UID directly first (fastest)
-          try {
-            const docRef = doc(db, 'users', userData.referredBy);
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-              referrerDoc = docSnap;
+        // 4. Referral Bonus Logic: 30% of first deposit
+        if (isFirstDeposit && userData.referredBy) {
+          const bonusAmount = Math.floor(request.amount * 0.3);
+          if (bonusAmount > 0) {
+            // Find referrer
+            const referrerRef = doc(db, 'users', userData.referredBy);
+            // Verify referrer exists
+            const referrerSnap = await transaction.get(referrerRef);
+            
+            if (referrerSnap.exists()) {
+              transaction.update(referrerRef, {
+                balance: increment(bonusAmount),
+                referralDepositCount: increment(1),
+                referralDepositAmount: increment(request.amount)
+              });
+
+              // Add transaction for referrer
+              const refTransRef = doc(collection(db, 'transactions'));
+              transaction.set(refTransRef, {
+                userId: userData.referredBy,
+                type: 'referral',
+                amount: bonusAmount,
+                status: 'completed',
+                createdAt: Date.now(),
+                description: `Referral bonus from ${userData.phone || userData.name}'s first deposit`
+              });
             }
-          } catch (e) {
-            console.log("Direct UID lookup for bonus failed");
-          }
-
-          if (!referrerDoc) {
-            // 2. Try to search by phone or ID field if direct lookup failed
-            const q = query(usersRef, where('id', '==', userData.referredBy));
-            const qPhone = query(usersRef, where('phone', '==', userData.referredBy));
-            const [qSnap, qSnapPhone] = await Promise.all([getDocs(q), getDocs(qPhone)]);
-            referrerDoc = qSnap.docs[0] || qSnapPhone.docs[0];
-          }
-
-          if (referrerDoc) {
-            const referrerRef = doc(db, 'users', referrerDoc.id);
-            await updateDoc(referrerRef, {
-              balance: increment(bonusAmount),
-              referralDepositCount: increment(1),
-              referralDepositAmount: increment(request.amount)
-            });
-
-            // Add transaction for referrer
-            await addDoc(collection(db, 'transactions'), {
-              userId: referrerDoc.id,
-              type: 'referral',
-              amount: bonusAmount,
-              status: 'completed',
-              createdAt: Date.now(),
-              description: `Referral bonus from ${userData.phone || userData.name}'s first deposit`
-            });
           }
         }
-      }
+      });
 
-      await updateDoc(doc(db, 'deposits', id), { status: 'completed' });
       toast.success('Deposit approved!');
     } catch (error) {
       console.error("Deposit approval error:", error);
-      handleFirestoreError(error, OperationType.UPDATE, 'deposits');
+      toast.error(error instanceof Error ? error.message : 'Approval failed');
+      try {
+        handleFirestoreError(error, OperationType.UPDATE, 'deposits-transaction');
+      } catch (err) {
+        // handleFirestoreError throws
+      }
     } finally {
       setIsProcessing(null);
     }
@@ -462,7 +452,11 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
     if (isProcessing) return;
     setIsProcessing(id);
     try {
-      await updateDoc(doc(db, 'deposits', id), { status: 'failed' });
+      await updateDoc(doc(db, 'deposits', id), { 
+        status: 'failed',
+        processedAt: serverTimestamp(),
+        processedBy: user.id
+      });
       toast.error('Deposit rejected');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'deposits');
@@ -478,10 +472,36 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
     
     setIsProcessing(id);
     try {
-      await updateDoc(doc(db, 'withdrawals', id), { status: 'completed' });
+      await runTransaction(db, async (transaction) => {
+        const witRef = doc(db, 'withdrawals', id);
+        const witSnap = await transaction.get(witRef);
+        
+        if (!witSnap.exists()) throw new Error('Withdrawal request not found');
+        if (witSnap.data().status !== 'pending') throw new Error('Withdrawal already processed');
+
+        // Update status
+        transaction.update(witRef, { 
+          status: 'completed',
+          processedAt: serverTimestamp(),
+          processedBy: user.id
+        });
+
+        // Add transaction record
+        const transRef = doc(collection(db, 'transactions'));
+        transaction.set(transRef, {
+          userId: request.userId,
+          type: 'withdrawal',
+          amount: request.amount,
+          status: 'completed',
+          createdAt: Date.now(),
+          description: `Withdrawal Approved (Order: ${request.orderNumber})`
+        });
+      });
+
       toast.success('Withdrawal approved!');
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'withdrawals');
+      console.error("Withdrawal approval error:", error);
+      toast.error(error instanceof Error ? error.message : 'Approval failed');
     } finally {
       setIsProcessing(null);
     }
@@ -494,12 +514,43 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
     
     setIsProcessing(id);
     try {
-      const userRef = doc(db, 'users', request.userId);
-      await updateDoc(userRef, { balance: increment(request.amount) });
-      await updateDoc(doc(db, 'withdrawals', id), { status: 'failed' });
+      await runTransaction(db, async (transaction) => {
+        const witRef = doc(db, 'withdrawals', id);
+        const witSnap = await transaction.get(witRef);
+        
+        if (!witSnap.exists()) throw new Error('Withdrawal request not found');
+        if (witSnap.data().status !== 'pending') throw new Error('Withdrawal already processed');
+
+        const userRef = doc(db, 'users', request.userId);
+        const userSnap = await transaction.get(userRef);
+        if (!userSnap.exists()) throw new Error('User not found');
+
+        // 1. Refund the balance
+        transaction.update(userRef, { balance: increment(request.amount) });
+
+        // 2. Set status to failed
+        transaction.update(witRef, { 
+          status: 'failed',
+          processedAt: serverTimestamp(),
+          processedBy: user.id
+        });
+
+        // 3. Add transaction record (refund)
+        const transRef = doc(collection(db, 'transactions'));
+        transaction.set(transRef, {
+          userId: request.userId,
+          type: 'refund',
+          amount: request.amount,
+          status: 'completed',
+          createdAt: Date.now(),
+          description: `Withdrawal Rejected & Refunded (Order: ${request.orderNumber})`
+        });
+      });
+
       toast.error('Withdrawal rejected and balance refunded!');
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'withdrawals');
+       console.error("Withdrawal rejection error:", error);
+       toast.error(error instanceof Error ? error.message : 'Rejection failed');
     } finally {
       setIsProcessing(null);
     }

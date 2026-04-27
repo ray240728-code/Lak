@@ -52,7 +52,7 @@ export const calculatePayout = (bet: Bet, result: { color: Color[]; number: Numb
   // If selection is a number
   if (typeof selection === 'number') {
     if (selection === result.number) {
-      return amount * 9; // Number guess usually pays 9x (including stake) or 8x + stake
+      return amount * 4; // User requested 4x for number
     }
     return 0;
   }
@@ -60,11 +60,14 @@ export const calculatePayout = (bet: Bet, result: { color: Color[]; number: Numb
   // If selection is a color
   if (selection === 'red' || selection === 'green' || selection === 'violet') {
     if (result.color.includes(selection)) {
-      // Special payout for violet (2.5x if split, or similar)
-      // Usually Red/Green pays 2x, Violet pays 4.5x
-      if (selection === 'violet') return amount * 4.5;
-      if (result.color.includes('violet')) return amount * 1.5; // If red+violet and you bet red, you get 1.5x
-      return amount * 2;
+      // User requested 1.9x for color. 
+      // If it's a split result (0 or 5), usually it's halved, but user didn't specify.
+      // However, to be safe and logical, if hit violet it could be higher, 
+      // but "colour ... 1.9x" is quite specific.
+      
+      if (selection === 'violet') return amount * 4.5; // Keeping violet higher as it's rare
+      if (result.color.includes('violet')) return amount * 1.5; // Split win
+      return amount * 1.9;
     }
     return 0;
   }
@@ -72,7 +75,7 @@ export const calculatePayout = (bet: Bet, result: { color: Color[]; number: Numb
   // If selection is Big/Small
   if (selection === 'big' || selection === 'small') {
     if (selection === result.bigSmall) {
-      return amount * 2;
+      return amount * 1.9; // User requested 1.9x for big/small
     }
     return 0;
   }

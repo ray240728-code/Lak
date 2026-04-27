@@ -240,34 +240,49 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
   }, [user.id, predictionConfigs]);
 
   useEffect(() => {
-    const now = Date.now();
-    const initialRoundId = getRoundId(activeMode, now);
-    setCurrentRoundId(initialRoundId);
+    const modes: GameMode[] = ['1min', '3min', '5min', '10min'];
+    const currentRoundIds: Record<string, string> = {};
     
+    // Initialize round IDs for all modes
+    modes.forEach(mode => {
+      currentRoundIds[mode] = getRoundId(mode, Date.now());
+    });
+    
+    setCurrentRoundId(currentRoundIds[activeMode]);
+
     const interval = setInterval(() => {
       const currentTime = Date.now();
+      
+      // Update time left for the active mode
       let modeSeconds = 60;
       if (activeMode === '3min') modeSeconds = 180;
       if (activeMode === '5min') modeSeconds = 300;
       if (activeMode === '10min') modeSeconds = 600;
       
       const secondsPassed = Math.floor(currentTime / 1000) % modeSeconds;
-      const remaining = modeSeconds - secondsPassed;
-      setTimeLeft(remaining);
+      setTimeLeft(modeSeconds - secondsPassed);
       
-      const newRoundId = getRoundId(activeMode, currentTime);
-      if (newRoundId !== currentRoundId) {
-        if (currentRoundId) {
-          handleRoundEnd(currentRoundId, activeMode);
+      // Check for round transitions in ALL modes
+      modes.forEach(mode => {
+        const newRoundId = getRoundId(mode, currentTime);
+        if (newRoundId !== currentRoundIds[mode]) {
+          const oldRoundId = currentRoundIds[mode];
+          currentRoundIds[mode] = newRoundId;
           
-          // Potentially handle missed rounds if clock jumped significantly
-          // This is a simple catch-up for history consistency
+          if (mode === activeMode) {
+            setCurrentRoundId(newRoundId);
+          }
+          
+          if (oldRoundId) {
+            console.log(`Round ended for ${mode}: ${oldRoundId}`);
+            handleRoundEnd(oldRoundId, mode);
+          }
         }
-        setCurrentRoundId(newRoundId);
-      }
+      });
     }, 1000);
+
     return () => clearInterval(interval);
-  }, [activeMode, currentRoundId, handleRoundEnd]);
+  }, [activeMode, handleRoundEnd]);
 
   const placeBet = async () => {
     const amount = parseFloat(betAmount) * multiplier;
@@ -287,12 +302,36 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
         createdAt: serverTimestamp(),
         status: 'pending'
       };
-      await updateDoc(doc(db, 'users', user.id), { balance: increment(-amount) });
-      await addDoc(collection(db, 'bets'), newBet);
+
+      await runTransaction(db, async (transaction) => {
+        const userRef = doc(db, 'users', user.id);
+        const userSnap = await transaction.get(userRef);
+        
+        if (!userSnap.exists()) throw new Error('User profile not found');
+        const currentBalance = userSnap.data().balance || 0;
+        
+        if (currentBalance < amount) {
+          throw new Error('Insufficient balance');
+        }
+
+        // 1. Deduct balance
+        transaction.update(userRef, { balance: increment(-amount) });
+
+        // 2. Create bet document
+        const betRef = doc(collection(db, 'bets'));
+        transaction.set(betRef, newBet);
+      });
+
       setBetModalOpen(false);
       toast.success('Bet placed!');
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'bets');
+      console.error("Bet placement error:", error);
+      const isBalanceError = error instanceof Error && error.message === 'Insufficient balance';
+      if (isBalanceError) {
+        toast.error('Insufficient balance');
+      } else {
+        handleFirestoreError(error, OperationType.CREATE, 'bets');
+      }
     } finally {
       setIsPlacingBet(false);
     }
@@ -661,7 +700,12 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
         <DialogContent className="bg-white border-none text-gray-800 rounded-t-[2rem] sm:rounded-[2rem] p-0 overflow-hidden max-w-md shadow-2xl">
           <div className="bg-gradient-to-r from-[#ff7e7e] to-[#ff4d4d] p-6 text-center text-white">
             <h3 className="text-xl font-black uppercase tracking-tight">Win Go {activeMode}</h3>
-            <p className="text-[10px] font-bold opacity-80 mt-1 uppercase tracking-widest">Select: {selectedBet}</p>
+            <div className="flex flex-col items-center gap-1 mt-1">
+              <p className="text-[10px] font-bold opacity-80 uppercase tracking-widest">Select: {selectedBet}</p>
+              <Badge className="bg-white/20 text-white border-none text-[9px] font-black uppercase px-2 py-0.5">
+                Payout: {typeof selectedBet === 'number' ? '4x' : '1.9x'} 
+              </Badge>
+            </div>
           </div>
           <div className="p-6 space-y-6">
             <div className="space-y-4">

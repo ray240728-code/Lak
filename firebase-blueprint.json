@@ -65,14 +65,15 @@
         "id": { "type": "string" },
         "userId": { "type": "string" },
         "roundId": { "type": "string" },
-        "mode": { "type": "string" },
+        "mode": { "type": "string", "enum": ["1min", "3min", "5min", "10min"] },
         "amount": { "type": "number" },
-        "selection": { "type": "string" },
+        "selection": { "type": ["string", "number"] },
         "status": { "type": "string", "enum": ["pending", "win", "loss"] },
         "payout": { "type": "number" },
-        "timestamp": { "type": "number" }
+        "createdAt": { "type": "object" },
+        "result": { "type": "object" }
       },
-      "required": ["id", "userId", "roundId", "mode", "amount", "selection", "status", "timestamp"]
+      "required": ["userId", "roundId", "mode", "amount", "selection", "status", "createdAt"]
     },
     "GameHistory": {
       "title": "GameHistory",
@@ -87,7 +88,8 @@
         "startTime": { "type": "number" },
         "endTime": { "type": "number" },
         "status": { "type": "string" }
-      }
+      },
+      "required": ["id", "mode", "resultNumber", "resultColor", "resultBigSmall", "status"]
     },
     "GiftCard": {
       "title": "GiftCard",
@@ -100,7 +102,8 @@
         "minDeposit": { "type": "number" },
         "status": { "type": "string" },
         "claimedBy": { "type": "array", "items": { "type": "string" } }
-      }
+      },
+      "required": ["code", "amount", "status"]
     },
     "Deposit": {
       "title": "Deposit",
@@ -109,12 +112,16 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
+        "phone": { "type": "string" },
         "amount": { "type": "number" },
         "utr": { "type": "string" },
-        "status": { "type": "string" },
-        "timestamp": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "completed", "failed"] },
+        "createdAt": { "type": "object" },
+        "processedAt": { "type": "object" },
+        "processedBy": { "type": "string" },
         "orderNumber": { "type": "string" }
-      }
+      },
+      "required": ["userId", "amount", "utr", "status", "createdAt", "orderNumber"]
     },
     "Withdrawal": {
       "title": "Withdrawal",
