@@ -117,7 +117,8 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
 
     const qBets = query(collection(db, 'bets'), where('userId', '==', user.id), orderBy('createdAt', 'desc'), limit(50));
     const unsubscribeBets = onSnapshot(qBets, (snapshot) => {
-      setMyBets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bet)));
+      const betsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bet));
+      setMyBets(betsData);
     });
 
     const predictionUnsubscribes = ['1min', '3min', '5min', '10min'].map(mode => 
@@ -137,10 +138,10 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
   }, [user.id]);
 
   const handleRoundEnd = useCallback(async (roundId: string, mode: GameMode) => {
+    console.log(`Settling round ${roundId} for ${mode}`);
     let result = generateRoundResult(roundId);
     
     // FETCH LIVE PREDICTION (Override if admin set one)
-    // Check both slots in case of transition
     const predData = predictionConfigs[mode];
     if (predData) {
       if (predData.currentRoundId === roundId && predData.currentResult) {
@@ -162,10 +163,18 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
     };
 
     try {
-      const q = query(collection(db, 'bets'), where('roundId', '==', roundId), where('status', '==', 'pending'), where('userId', '==', user.id));
+      // Find all pending bets for this round and user
+      const q = query(
+        collection(db, 'bets'), 
+        where('roundId', '==', roundId), 
+        where('status', '==', 'pending'), 
+        where('userId', '==', user.id)
+      );
+      
       const querySnapshot = await getDocs(q);
+      
+      // Even if no bets, record history if missing
       if (querySnapshot.empty) {
-        // Even if no bets, we still want to record the game history once
         const historyRef = doc(db, 'game_history', roundId);
         const historySnap = await getDoc(historyRef);
         if (!historySnap.exists()) {
@@ -181,28 +190,22 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
         const userRef = doc(db, 'users', user.id);
         const userSnap = await transaction.get(userRef);
 
-        // Fetch all bet snapshots first
-        const betSnapshots = [];
-        for (const betDoc of querySnapshot.docs) {
-          const betRef = doc(db, 'bets', betDoc.id);
-          const freshBetSnap = await transaction.get(betRef);
-          if (freshBetSnap.exists() && freshBetSnap.data()?.status === 'pending') {
-            betSnapshots.push({ ref: betRef, snap: freshBetSnap });
-          }
-        }
-
-        // NOW PERFORM ALL WRITES
         if (!historySnap.exists()) {
           transaction.set(historyRef, newRound);
         }
 
         let totalWinPayout = 0;
-        for (const { ref: betRef, snap: freshBetSnap } of betSnapshots) {
-          const betData = freshBetSnap.data() as Bet;
+        let winnersFound = false;
+
+        for (const betDoc of querySnapshot.docs) {
+          const betSnap = await transaction.get(betDoc.ref);
+          if (!betSnap.exists() || betSnap.data()?.status !== 'pending') continue;
+
+          const betData = betSnap.data() as Bet;
           const payout = calculatePayout(betData, result);
           const status = payout > 0 ? 'win' : 'loss';
           
-          transaction.update(betRef, {
+          transaction.update(betDoc.ref, {
             status,
             payout,
             result: {
@@ -214,20 +217,19 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
 
           if (payout > 0) {
             totalWinPayout += payout;
+            winnersFound = true;
           }
 
-          // Local state updates for UI feedback (outside transaction logic but within closure)
-          if (betData.userId === user.id) {
-            setLastResult({
-              status: payout > 0 ? 'win' : 'loss',
-              amount: payout > 0 ? payout : betData.amount,
-              roundId: roundId,
-              number: result.number,
-              color: result.color,
-              bigSmall: result.bigSmall
-            });
-            setShowResultPopup(true);
-          }
+          // UI feedback
+          setLastResult({
+            status: payout > 0 ? 'win' : 'loss',
+            amount: payout > 0 ? payout : betData.amount,
+            roundId: roundId,
+            number: result.number,
+            color: result.color,
+            bigSmall: result.bigSmall
+          });
+          setShowResultPopup(true);
         }
 
         if (totalWinPayout > 0 && userSnap.exists()) {
@@ -238,6 +240,25 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
       console.error("Error processing round end:", error);
     }
   }, [user.id, predictionConfigs]);
+
+  // Catch-up effect for pending old bets
+  useEffect(() => {
+    const pendingOldBets = myBets.filter(bet => {
+      if (bet.status !== 'pending') return false;
+      const currentId = getRoundId(bet.mode, Date.now());
+      // Settle if the round ID is less than the current one (meaning it has passed)
+      return bet.roundId < currentId;
+    });
+
+    if (pendingOldBets.length > 0) {
+      console.log(`Auto-settling ${pendingOldBets.length} overdue bets`);
+      // Process them one by one or in small batches if needed
+      // For now, sequentially or via handleRoundEnd
+      pendingOldBets.forEach(bet => {
+        handleRoundEnd(bet.roundId, bet.mode);
+      });
+    }
+  }, [myBets, handleRoundEnd]);
 
   useEffect(() => {
     const modes: GameMode[] = ['1min', '3min', '5min', '10min'];

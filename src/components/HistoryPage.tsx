@@ -125,19 +125,25 @@ export default function HistoryPage({ title, type, onBack, user }: HistoryPagePr
                 </div>
                 <div className="text-right">
                   <p className={`text-sm font-bold ${
-                    item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' || item.type === 'referral' || type === 'deposit'
+                    (item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' || item.type === 'referral' || (type === 'deposit' && item.status === 'completed'))
                       ? 'text-green-500' 
-                      : item.status === 'pending' ? 'text-gray-400' : 'text-red-500'
+                      : (item.status === 'pending' || item.status === 'waiting') ? 'text-orange-400' : 'text-gray-400'
                   }`}>
-                    {item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' || item.type === 'referral' || type === 'deposit' ? '+' : '-'}
-                    ₹{(parseFloat(item.amount) || 0).toFixed(2)}
+                    {(item.status === 'win' || item.type === 'win' || item.type === 'deposit' || item.type === 'gift' || item.type === 'referral' || type === 'deposit') ? '+' : '-'}
+                    ₹{(parseFloat(item.amount || item.payout) || 0).toFixed(2)}
                   </p>
-                  <p className={`text-[10px] ${
-                    item.status === 'completed' || item.status === 'approved' || item.status === 'win' || item.status === 'loss'
-                      ? 'text-gray-400' 
+                  <p className={`text-[10px] items-center justify-end flex gap-1 ${
+                    item.status === 'completed' || item.status === 'win'
+                      ? 'text-green-500 font-bold' 
+                      : item.status === 'failed' || item.status === 'loss'
+                      ? 'text-red-500 font-bold'
                       : 'text-orange-500 font-bold'
                   }`}>
-                    {item.status}
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      item.status === 'completed' || item.status === 'win' ? 'bg-green-500' :
+                      item.status === 'failed' || item.status === 'loss' ? 'bg-red-500' : 'bg-orange-500 animate-pulse'
+                    }`} />
+                    {item.status?.toUpperCase() || 'UNKNOWN'}
                   </p>
                 </div>
               </CardContent>
