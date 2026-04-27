@@ -20,6 +20,7 @@ import GameStats from './components/GameStats';
 import HistoryPage from './components/HistoryPage';
 import Deposit from './components/Deposit';
 import Withdraw from './components/Withdraw';
+import BackgroundSettlement from './components/BackgroundSettlement';
 
 type Page = 'login' | 'register' | 'home' | 'activity' | 'wallet' | 'promotion' | 'profile' | 'wingo' | 'admin' | 'security' | 'guide' | 'about' | 'salary' | 'game-stats' | 'history-bet' | 'history-transaction' | 'history-deposit' | 'history-withdraw' | 'deposit' | 'withdraw';
 
@@ -486,6 +487,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#f8f3f3] text-gray-900 font-sans overflow-x-hidden">
       <Toaster position="top-center" richColors />
+      <BackgroundSettlement user={user} />
       
       <AnimatePresence mode="wait">
         <motion.div

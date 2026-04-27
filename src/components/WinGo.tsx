@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Trophy, 
@@ -62,6 +62,7 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
   const [historyTab, setHistoryTab] = useState('history');
   const [predictionConfigs, setPredictionConfigs] = useState<Record<string, any>>({});
+  const lastRoundIds = useRef<Record<string, string>>({});
 
   useEffect(() => {
     const unsubscribeBalance = onSnapshot(doc(db, 'users', user.id), (docSnap) => {
@@ -190,22 +191,24 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
         const userRef = doc(db, 'users', user.id);
         const userSnap = await transaction.get(userRef);
 
+        const betSnapshots = await Promise.all(
+          querySnapshot.docs.map(betDoc => transaction.get(betDoc.ref))
+        );
+
         if (!historySnap.exists()) {
           transaction.set(historyRef, newRound);
         }
 
         let totalWinPayout = 0;
-        let winnersFound = false;
 
-        for (const betDoc of querySnapshot.docs) {
-          const betSnap = await transaction.get(betDoc.ref);
+        for (const betSnap of betSnapshots) {
           if (!betSnap.exists() || betSnap.data()?.status !== 'pending') continue;
 
           const betData = betSnap.data() as Bet;
           const payout = calculatePayout(betData, result);
           const status = payout > 0 ? 'win' : 'loss';
           
-          transaction.update(betDoc.ref, {
+          transaction.update(betSnap.ref, {
             status,
             payout,
             result: {
@@ -217,7 +220,6 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
 
           if (payout > 0) {
             totalWinPayout += payout;
-            winnersFound = true;
           }
 
           // UI feedback
@@ -262,14 +264,15 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
 
   useEffect(() => {
     const modes: GameMode[] = ['1min', '3min', '5min', '10min'];
-    const currentRoundIds: Record<string, string> = {};
     
-    // Initialize round IDs for all modes
+    // Initialize round IDs if not set
     modes.forEach(mode => {
-      currentRoundIds[mode] = getRoundId(mode, Date.now());
+      if (!lastRoundIds.current[mode]) {
+        lastRoundIds.current[mode] = getRoundId(mode, Date.now());
+      }
     });
     
-    setCurrentRoundId(currentRoundIds[activeMode]);
+    setCurrentRoundId(lastRoundIds.current[activeMode]);
 
     const interval = setInterval(() => {
       const currentTime = Date.now();
@@ -286,9 +289,9 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
       // Check for round transitions in ALL modes
       modes.forEach(mode => {
         const newRoundId = getRoundId(mode, currentTime);
-        if (newRoundId !== currentRoundIds[mode]) {
-          const oldRoundId = currentRoundIds[mode];
-          currentRoundIds[mode] = newRoundId;
+        if (newRoundId !== lastRoundIds.current[mode]) {
+          const oldRoundId = lastRoundIds.current[mode];
+          lastRoundIds.current[mode] = newRoundId;
           
           if (mode === activeMode) {
             setCurrentRoundId(newRoundId);

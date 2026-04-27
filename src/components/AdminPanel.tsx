@@ -30,7 +30,7 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ActivityItem, GiftCard, DepositRequest, WithdrawalRequest, AppSettings, User, GameMode } from '../types';
-import { getRoundId, generateRoundResult } from '../lib/gameLogic';
+import { getRoundId, generateRoundResult, calculatePayout } from '../lib/gameLogic';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, onSnapshot, query, orderBy, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, where, getDocs, limit, increment, runTransaction, serverTimestamp } from 'firebase/firestore';
 
@@ -562,6 +562,57 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
       toast.success('Settings saved successfully!');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'config/settings');
+    }
+  };
+
+  const handleForceSettle = async () => {
+    try {
+      const q = query(collection(db, 'bets'), where('status', '==', 'pending'), limit(100));
+      const snapshot = await getDocs(q);
+      if (snapshot.empty) {
+        toast.info('No pending bets found to settle');
+        return;
+      }
+
+      toast.info(`Attempting to settle ${snapshot.size} bets...`);
+      const now = Date.now();
+      let settledCount = 0;
+
+      for (const betDoc of snapshot.docs) {
+        const bet = betDoc.data();
+        const currentRoundId = getRoundId(bet.mode, now);
+        if (bet.roundId < currentRoundId) {
+          // It's an old bet, settle it
+          const result = generateRoundResult(bet.roundId);
+          // Simplified settlement for manual force
+          await runTransaction(db, async (transaction) => {
+            const bSnap = await transaction.get(betDoc.ref);
+            if (!bSnap.exists() || bSnap.data()?.status !== 'pending') return;
+
+            const payout = calculatePayout(bSnap.data() as any, result);
+            transaction.update(betDoc.ref, {
+              status: payout > 0 ? 'win' : 'loss',
+              payout,
+              result: {
+                number: result.number,
+                color: result.color,
+                bigSmall: result.bigSmall
+              },
+              updatedAt: now
+            });
+
+            if (payout > 0) {
+              const uRef = doc(db, 'users', bet.userId);
+              transaction.update(uRef, { balance: increment(payout) });
+            }
+          });
+          settledCount++;
+        }
+      }
+      toast.success(`Settled ${settledCount} bets successfully`);
+    } catch (error) {
+      console.error("Force settle error:", error);
+      toast.error('Force settlement failed');
     }
   };
 
@@ -1176,7 +1227,16 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
                      <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Real-time Stream</h2>
                      <p className="text-sm font-black text-slate-800 tracking-tight italic">Live Market Activity</p>
                    </div>
-                   <Badge className="bg-emerald-500 text-white text-[8px] font-black tracking-widest px-3 py-1 animate-pulse">STREAMING_LIVE</Badge>
+                   <div className="flex gap-2 items-center">
+                     <Button 
+                       onClick={handleForceSettle}
+                       variant="outline" 
+                       className="h-8 text-[10px] font-black uppercase tracking-widest border-red-200 text-red-500 hover:bg-red-50"
+                     >
+                       Force Settle
+                     </Button>
+                     <Badge className="bg-emerald-500 text-white text-[8px] font-black tracking-widest px-3 py-1 animate-pulse">STREAMING_LIVE</Badge>
+                   </div>
                 </div>
                 
                 <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
