@@ -280,11 +280,16 @@ export default function WinGo({ onNavigate, user }: WinGoProps) {
         bigSmall: finalResult.bigSmall
       });
       
+      console.log(`[WinGo] Triggering popup for ${roundId}: ${bestStatus} (₹${bestStatus === 'win' ? bestPayout : playedAmount})`);
+      
       // Delay slightly for dramatic effect or to ensure states are settled
-      setTimeout(() => setShowResultPopup(true), 1000);
+      setTimeout(() => {
+        setShowResultPopup(true);
+      }, 1000);
 
     } catch (error) {
       console.error("Error processing round end:", error);
+      // Optional: Settle on error anyway? Safe to just log.
     }
   }, [user.id, predictionConfigs]);
 

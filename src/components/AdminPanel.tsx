@@ -379,6 +379,13 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
         const userData = userSnap.data() as User;
         const isFirstDeposit = !userData.totalDeposit || userData.totalDeposit === 0;
 
+        // PRE-FETCH REFERRER IF NEEDED
+        let referrerSnap = null;
+        if (isFirstDeposit && userData.referredBy) {
+          const referrerRef = doc(db, 'users', userData.referredBy);
+          referrerSnap = await transaction.get(referrerRef);
+        }
+
         // 1. Update user balance and totalDeposit
         transaction.update(userRef, {
           balance: increment(request.amount),
@@ -404,32 +411,26 @@ export default function AdminPanel({ onNavigate, user }: AdminPanelProps) {
         });
 
         // 4. Referral Bonus Logic: 30% of first deposit
-        if (isFirstDeposit && userData.referredBy) {
+        if (isFirstDeposit && userData.referredBy && referrerSnap && referrerSnap.exists()) {
           const bonusAmount = Math.floor(request.amount * 0.3);
           if (bonusAmount > 0) {
-            // Find referrer
             const referrerRef = doc(db, 'users', userData.referredBy);
-            // Verify referrer exists
-            const referrerSnap = await transaction.get(referrerRef);
-            
-            if (referrerSnap.exists()) {
-              transaction.update(referrerRef, {
-                balance: increment(bonusAmount),
-                referralDepositCount: increment(1),
-                referralDepositAmount: increment(request.amount)
-              });
+            transaction.update(referrerRef, {
+              balance: increment(bonusAmount),
+              referralDepositCount: increment(1),
+              referralDepositAmount: increment(request.amount)
+            });
 
-              // Add transaction for referrer
-              const refTransRef = doc(collection(db, 'transactions'));
-              transaction.set(refTransRef, {
-                userId: userData.referredBy,
-                type: 'referral',
-                amount: bonusAmount,
-                status: 'completed',
-                createdAt: Date.now(),
-                description: `Referral bonus from ${userData.phone || userData.name}'s first deposit`
-              });
-            }
+            // Add transaction for referrer
+            const refTransRef = doc(collection(db, 'transactions'));
+            transaction.set(refTransRef, {
+              userId: userData.referredBy,
+              type: 'referral',
+              amount: bonusAmount,
+              status: 'completed',
+              createdAt: Date.now(),
+              description: `Referral bonus from ${userData.phone || userData.name}'s first deposit`
+            });
           }
         }
       });
